@@ -1,0 +1,337 @@
+package com.example.smartlogistics
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.compose.animation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.example.smartlogistics.ui.screens.*
+import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.viewmodel.MainViewModel
+import com.amap.api.maps.MapsInitializer
+
+class MainActivity : ComponentActivity() {
+    
+    private val viewModel: MainViewModel by viewModels()
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        try {
+            MapsInitializer.updatePrivacyShow(this, true, true)
+            MapsInitializer.updatePrivacyAgree(this, true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 初始化网络客户端
+        com.example.smartlogistics.network.RetrofitClient.init(
+            context = applicationContext,
+            useMock = true // 开发阶段使用Mock
+        )
+        
+        setContent {
+            SmartLogisticsTheme {
+                MainAppEntry(viewModel = viewModel)
+            }
+        }
+    }
+}
+
+
+@Composable
+fun MainAppEntry(viewModel: MainViewModel) {
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    
+    // 当前用户主页路由
+    var userHomeRoute by remember { mutableStateOf("car_home") }
+    
+    // 底部导航配置
+    val bottomItems = listOf(
+        BottomNavItem("主页", userHomeRoute, Icons.Rounded.Home),
+        BottomNavItem("导航", "navigation_map", Icons.Rounded.Navigation),
+        BottomNavItem("我的", "user_profile", Icons.Rounded.Person)
+    )
+    
+    // 显示底部导航栏的页面
+    val showBottomBar = currentRoute in listOf(
+        "truck_home",
+        "car_home",
+        "navigation_map",
+        "user_profile"
+    )
+    
+    // 根据当前模式决定主色
+    val isProfessionalMode = currentRoute?.startsWith("truck") == true || 
+                             userHomeRoute == "truck_home"
+    val primaryColor = if (isProfessionalMode) TruckOrange else CarGreen
+    
+    Scaffold(
+        bottomBar = {
+            AnimatedVisibility(
+                visible = showBottomBar,
+                enter = slideInVertically(initialOffsetY = { it }),
+                exit = slideOutVertically(targetOffsetY = { it })
+            ) {
+                NavigationBar(
+                    modifier = Modifier
+                        .shadow(16.dp)
+                        .background(Color.White),
+                    containerColor = Color.White,
+                    tonalElevation = 0.dp
+                ) {
+                    bottomItems.forEach { item ->
+                        val isSelected = if (item.name == "主页") {
+                            currentRoute == "truck_home" || currentRoute == "car_home"
+                        } else {
+                            currentRoute == item.route
+                        }
+                        
+                        NavigationBarItem(
+                            icon = {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.name,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = item.name,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            },
+                            selected = isSelected,
+                            onClick = {
+                                val targetRoute = if (item.name == "主页") userHomeRoute else item.route
+                                navController.navigate(targetRoute) {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = primaryColor,
+                                selectedTextColor = primaryColor,
+                                unselectedIconColor = TextTertiary,
+                                unselectedTextColor = TextTertiary,
+                                indicatorColor = primaryColor.copy(alpha = 0.1f)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = "login",
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            // ==================== 认证模块 ====================
+            composable("login") {
+                LoginScreen(
+                    navController = navController,
+                    viewModel = viewModel,
+                    onLoginSuccess = { targetHome ->
+                        userHomeRoute = targetHome
+                    }
+                )
+            }
+            
+            composable("register") {
+                RegisterScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            // ==================== 货车司机模块 ====================
+            composable("truck_home") {
+                TruckHomeScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("truck_bind") {
+                TruckBindScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("truck_route") {
+                TruckRouteScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("truck_road") {
+                TruckRoadScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("truck_congestion") {
+                TruckCongestionScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("truck_history") {
+                TruckHistoryScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+
+            composable( route = "cargo_report") {
+                CargoReportScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            // ==================== 私家车主模块 ====================
+            composable("car_home") {
+                CarHomeScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("car_bind") {
+                CarBindScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("car_route") {
+                CarRouteScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("car_road") {
+                CarRoadScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("car_congestion") {
+                CarCongestionScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("car_history") {
+                CarHistoryScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("my_trips") {
+                MyTripsScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            // ==================== 公共模块 ====================
+            composable("navigation_map") {
+                NavigationMapScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable(
+                route = "ai_result/{query}",
+                arguments = listOf(
+                    navArgument("query") { 
+                        type = NavType.StringType 
+                        defaultValue = ""
+                    }
+                )
+            ) { backStackEntry ->
+                val query = backStackEntry.arguments?.getString("query") ?: ""
+                AiResultScreen(
+                    navController = navController,
+                    query = query,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("user_profile") {
+                UserProfileScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("settings") {
+                SettingsScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            // ==================== AI对话页面 ====================
+            composable("ai_chat") {
+                AiChatScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+
+            composable("ai_result/{query}") {
+                AiChatScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+        }
+    }
+}
+
+// 底部导航项数据类
+data class BottomNavItem(
+    val name: String,
+    val route: String,
+    val icon: ImageVector
+)
