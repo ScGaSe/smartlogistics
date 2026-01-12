@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 com.example.smartlogistics.app-lifecycle-viewmodel-savedstate-2.7.0-0 C:\Users\HUAWEI\.gradle\caches\transforms-3\06c7ac21f2ec2667826c3884ae78d031\transformed\lifecycle-viewmodel-savedstate-2.7.0\res
 com.example.smartlogistics.app-ui-release-1 C:\Users\HUAWEI\.gradle\caches\transforms-3\0a8f1651210ee22f92a579bb17164dbd\transformed\ui-release\res
 com.example.smartlogistics.app-material-ripple-release-2 C:\Users\HUAWEI\.gradle\caches\transforms-3\0f3a9930547fc0cb55aa516e67a1d82d\transformed\material-ripple-release\res
@@ -59,3 +60,65 @@ com.example.smartlogistics.app-packageDebugResources-57 E:\SmartLogistics_Androi
 com.example.smartlogistics.app-merged_res-58 E:\SmartLogistics_AndroidProject\android_project\app\build\intermediates\merged_res\debug
 com.example.smartlogistics.app-debug-59 E:\SmartLogistics_AndroidProject\android_project\app\src\debug\res
 com.example.smartlogistics.app-main-60 E:\SmartLogistics_AndroidProject\android_project\app\src\main\res
+=======
+com.example.smartlogistics.app-lifecycle-process-2.7.0-0 C:\Users\31352\.gradle\caches\transforms-3\01096349b0936ba7f741e909295c017b\transformed\lifecycle-process-2.7.0\res
+com.example.smartlogistics.app-savedstate-1.2.1-1 C:\Users\31352\.gradle\caches\transforms-3\040de899e265d6c45a386fd0e5e15c65\transformed\savedstate-1.2.1\res
+com.example.smartlogistics.app-customview-poolingcontainer-1.0.0-2 C:\Users\31352\.gradle\caches\transforms-3\076d8f7edaad13469d92c51ab804f23a\transformed\customview-poolingcontainer-1.0.0\res
+com.example.smartlogistics.app-activity-1.8.2-3 C:\Users\31352\.gradle\caches\transforms-3\15683ba0f4e359741be3d1ac6ec01816\transformed\activity-1.8.2\res
+com.example.smartlogistics.app-emoji2-1.3.0-4 C:\Users\31352\.gradle\caches\transforms-3\161d2e0566de4dbd90cbc47319c186f1\transformed\emoji2-1.3.0\res
+com.example.smartlogistics.app-material-release-5 C:\Users\31352\.gradle\caches\transforms-3\16c789bb9285954c75b43f1fc699031d\transformed\material-release\res
+com.example.smartlogistics.app-animation-core-release-6 C:\Users\31352\.gradle\caches\transforms-3\19dbbd1bb156853e187bc797ab886306\transformed\animation-core-release\res
+com.example.smartlogistics.app-ui-unit-release-7 C:\Users\31352\.gradle\caches\transforms-3\21ccedcd6056398927c820deecd63079\transformed\ui-unit-release\res
+com.example.smartlogistics.app-navigation-runtime-2.7.7-8 C:\Users\31352\.gradle\caches\transforms-3\268e8c13dfa0cd29390bf982272e3010\transformed\navigation-runtime-2.7.7\res
+com.example.smartlogistics.app-runtime-release-9 C:\Users\31352\.gradle\caches\transforms-3\26bfd46108faafb2b178d54c69184036\transformed\runtime-release\res
+com.example.smartlogistics.app-runtime-saveable-release-10 C:\Users\31352\.gradle\caches\transforms-3\2a83005bc517ad20f83ef49fd43c1c78\transformed\runtime-saveable-release\res
+com.example.smartlogistics.app-ui-test-manifest-1.6.1-11 C:\Users\31352\.gradle\caches\transforms-3\2dc711e477944a7bb968a910a9d1979f\transformed\ui-test-manifest-1.6.1\res
+com.example.smartlogistics.app-lifecycle-livedata-2.7.0-12 C:\Users\31352\.gradle\caches\transforms-3\30a09eae73419b67f441f5f88fc67516\transformed\lifecycle-livedata-2.7.0\res
+com.example.smartlogistics.app-ui-text-release-13 C:\Users\31352\.gradle\caches\transforms-3\31d9f94307d69efd0b06b960c3e9a541\transformed\ui-text-release\res
+com.example.smartlogistics.app-biometric-1.1.0-14 C:\Users\31352\.gradle\caches\transforms-3\32314396061ad6502c01bc6cf7bf8ed3\transformed\biometric-1.1.0\res
+com.example.smartlogistics.app-activity-compose-1.8.2-15 C:\Users\31352\.gradle\caches\transforms-3\32b40584c1c897379325d96151333602\transformed\activity-compose-1.8.2\res
+com.example.smartlogistics.app-lifecycle-runtime-compose-2.7.0-16 C:\Users\31352\.gradle\caches\transforms-3\3676dfb84619054249e3d3e425e772bc\transformed\lifecycle-runtime-compose-2.7.0\res
+com.example.smartlogistics.app-lifecycle-viewmodel-2.7.0-17 C:\Users\31352\.gradle\caches\transforms-3\3d04aff4df0f768f379e34d5f0b314db\transformed\lifecycle-viewmodel-2.7.0\res
+com.example.smartlogistics.app-core-1.12.0-18 C:\Users\31352\.gradle\caches\transforms-3\440a64c1659b3784956be1ef27019da1\transformed\core-1.12.0\res
+com.example.smartlogistics.app-activity-ktx-1.8.2-19 C:\Users\31352\.gradle\caches\transforms-3\46b1e779e36541f6b63e5a9150272094\transformed\activity-ktx-1.8.2\res
+com.example.smartlogistics.app-profileinstaller-1.3.0-20 C:\Users\31352\.gradle\caches\transforms-3\4dbbd11a74d28bd64c37893cccf57482\transformed\profileinstaller-1.3.0\res
+com.example.smartlogistics.app-ui-util-release-21 C:\Users\31352\.gradle\caches\transforms-3\4dd1407f095d4a15745fe6578075a871\transformed\ui-util-release\res
+com.example.smartlogistics.app-ui-release-22 C:\Users\31352\.gradle\caches\transforms-3\5bbe67b4e1976cf3ed30f61ba556027f\transformed\ui-release\res
+com.example.smartlogistics.app-appcompat-1.2.0-23 C:\Users\31352\.gradle\caches\transforms-3\6ad2f36a46526868315fd7052c296501\transformed\appcompat-1.2.0\res
+com.example.smartlogistics.app-foundation-release-24 C:\Users\31352\.gradle\caches\transforms-3\6ce9c11e848992c353af098ae2a01c4a\transformed\foundation-release\res
+com.example.smartlogistics.app-startup-runtime-1.1.1-25 C:\Users\31352\.gradle\caches\transforms-3\6ff610d5b5eece47f38e51599785a189\transformed\startup-runtime-1.1.1\res
+com.example.smartlogistics.app-core-ktx-1.12.0-26 C:\Users\31352\.gradle\caches\transforms-3\760c49e260287e65438a700d022f8c6b\transformed\core-ktx-1.12.0\res
+com.example.smartlogistics.app-material-ripple-release-27 C:\Users\31352\.gradle\caches\transforms-3\84d6fb2868b18105335575e7b4712edf\transformed\material-ripple-release\res
+com.example.smartlogistics.app-lifecycle-livedata-core-2.7.0-28 C:\Users\31352\.gradle\caches\transforms-3\858f42a16ccff625a3fdc18f55864700\transformed\lifecycle-livedata-core-2.7.0\res
+com.example.smartlogistics.app-material-icons-core-release-29 C:\Users\31352\.gradle\caches\transforms-3\900f6c9122ff0ec4c4bad154b7380139\transformed\material-icons-core-release\res
+com.example.smartlogistics.app-fragment-1.2.5-30 C:\Users\31352\.gradle\caches\transforms-3\9166f4e34aa5683a21254a96ffc2da32\transformed\fragment-1.2.5\res
+com.example.smartlogistics.app-foundation-layout-release-31 C:\Users\31352\.gradle\caches\transforms-3\937094f80f4e7454ed96974286a5303f\transformed\foundation-layout-release\res
+com.example.smartlogistics.app-ui-tooling-release-32 C:\Users\31352\.gradle\caches\transforms-3\9771ee3a6fb63528e277318d473454f1\transformed\ui-tooling-release\res
+com.example.smartlogistics.app-lifecycle-viewmodel-ktx-2.7.0-33 C:\Users\31352\.gradle\caches\transforms-3\99a0ceda7a5b31e43675d93bb3cc711b\transformed\lifecycle-viewmodel-ktx-2.7.0\res
+com.example.smartlogistics.app-material-icons-extended-release-34 C:\Users\31352\.gradle\caches\transforms-3\9cc1fbacbd56e22792122eac1d403e23\transformed\material-icons-extended-release\res
+com.example.smartlogistics.app-ui-geometry-release-35 C:\Users\31352\.gradle\caches\transforms-3\a070038706814f3574a9c7244b7afe65\transformed\ui-geometry-release\res
+com.example.smartlogistics.app-material3-release-36 C:\Users\31352\.gradle\caches\transforms-3\a535d965b3dc37d268d1a2b6329acea3\transformed\material3-release\res
+com.example.smartlogistics.app-annotation-experimental-1.4.0-37 C:\Users\31352\.gradle\caches\transforms-3\a667965df92ed2d22f4e1ea0c8cc5625\transformed\annotation-experimental-1.4.0\res
+com.example.smartlogistics.app-lifecycle-viewmodel-savedstate-2.7.0-38 C:\Users\31352\.gradle\caches\transforms-3\aca27ab5518a0c1fb21b10cba587b1e9\transformed\lifecycle-viewmodel-savedstate-2.7.0\res
+com.example.smartlogistics.app-lifecycle-viewmodel-compose-2.7.0-39 C:\Users\31352\.gradle\caches\transforms-3\af014887db996c09301b8a0a4b947758\transformed\lifecycle-viewmodel-compose-2.7.0\res
+com.example.smartlogistics.app-appcompat-resources-1.2.0-40 C:\Users\31352\.gradle\caches\transforms-3\b4009c564f6eac43efb9aad404fca38f\transformed\appcompat-resources-1.2.0\res
+com.example.smartlogistics.app-ui-tooling-preview-release-41 C:\Users\31352\.gradle\caches\transforms-3\bfa58336f66a84184035056155722743\transformed\ui-tooling-preview-release\res
+com.example.smartlogistics.app-lifecycle-runtime-2.7.0-42 C:\Users\31352\.gradle\caches\transforms-3\c0811ff559e841342aebad900e726f1e\transformed\lifecycle-runtime-2.7.0\res
+com.example.smartlogistics.app-core-runtime-2.2.0-43 C:\Users\31352\.gradle\caches\transforms-3\c420bb1138b5734b642235e867f979eb\transformed\core-runtime-2.2.0\res
+com.example.smartlogistics.app-navigation-compose-2.7.7-44 C:\Users\31352\.gradle\caches\transforms-3\ddae21cb431140dccc21b8f721531181\transformed\navigation-compose-2.7.7\res
+com.example.smartlogistics.app-lifecycle-livedata-core-ktx-2.7.0-45 C:\Users\31352\.gradle\caches\transforms-3\dec6e206e70a2badd417f3e586e76ac5\transformed\lifecycle-livedata-core-ktx-2.7.0\res
+com.example.smartlogistics.app-navigation-runtime-ktx-2.7.7-46 C:\Users\31352\.gradle\caches\transforms-3\e49329de4052ff46cb6fd5d9780d018e\transformed\navigation-runtime-ktx-2.7.7\res
+com.example.smartlogistics.app-animation-release-47 C:\Users\31352\.gradle\caches\transforms-3\e620a7da2f5875ef53bcfbf886553273\transformed\animation-release\res
+com.example.smartlogistics.app-lifecycle-runtime-ktx-2.7.0-48 C:\Users\31352\.gradle\caches\transforms-3\e988d893da54918c8afc17e2c51734b4\transformed\lifecycle-runtime-ktx-2.7.0\res
+com.example.smartlogistics.app-navigation-common-2.7.7-49 C:\Users\31352\.gradle\caches\transforms-3\f15eb4fc8aa13e9e04064ef1aafcb2c9\transformed\navigation-common-2.7.7\res
+com.example.smartlogistics.app-ui-graphics-release-50 C:\Users\31352\.gradle\caches\transforms-3\f80992176173c08eebe68f69f166d9be\transformed\ui-graphics-release\res
+com.example.smartlogistics.app-ui-tooling-data-release-51 C:\Users\31352\.gradle\caches\transforms-3\fae9b4568c8fe28d13b06354e8f50b46\transformed\ui-tooling-data-release\res
+com.example.smartlogistics.app-navigation-common-ktx-2.7.7-52 C:\Users\31352\.gradle\caches\transforms-3\fba3e7764a62f6d19533bdefdcae213d\transformed\navigation-common-ktx-2.7.7\res
+com.example.smartlogistics.app-savedstate-ktx-1.2.1-53 C:\Users\31352\.gradle\caches\transforms-3\feafe4506e00f055cc53add47b9260a0\transformed\savedstate-ktx-1.2.1\res
+com.example.smartlogistics.app-resValues-54 D:\Android Studio\smartlogistics\app\build\generated\res\resValues\debug
+com.example.smartlogistics.app-packageDebugResources-55 D:\Android Studio\smartlogistics\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.example.smartlogistics.app-packageDebugResources-56 D:\Android Studio\smartlogistics\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.example.smartlogistics.app-merged_res-57 D:\Android Studio\smartlogistics\app\build\intermediates\merged_res\debug
+com.example.smartlogistics.app-debug-58 D:\Android Studio\smartlogistics\app\src\debug\res
+com.example.smartlogistics.app-main-59 D:\Android Studio\smartlogistics\app\src\main\res
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab

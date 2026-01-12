@@ -77,10 +77,13 @@ attr alertDialogTheme
 attr allowStacking
 attr alpha
 attr alphabeticModifiers
+<<<<<<< HEAD
 attr amap_map3d_progressColor
 attr amap_map3d_progressText
 attr amap_map3d_progressTextColor
 attr amap_map3d_progressTextSize
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 attr argType
 attr arrowHeadLength
 attr arrowShaftLength
@@ -522,6 +525,7 @@ dimen abc_text_size_subhead_material
 dimen abc_text_size_subtitle_material_toolbar
 dimen abc_text_size_title_material
 dimen abc_text_size_title_material_toolbar
+<<<<<<< HEAD
 dimen amap_map3d_city_name_size
 dimen amap_map3d_city_progress_size
 dimen amap_map3d_city_size_size
@@ -548,6 +552,8 @@ dimen amap_map3d_title_text_size
 dimen amap_map3d_trace_spinner_padding
 dimen amap_map3d_width_title_leftImg
 dimen amap_map3d_zero
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 dimen compat_button_inset_horizontal_material
 dimen compat_button_inset_vertical_material
 dimen compat_button_padding_horizontal_material
@@ -674,6 +680,7 @@ drawable abc_textfield_search_activated_mtrl_alpha
 drawable abc_textfield_search_default_mtrl_alpha
 drawable abc_textfield_search_material
 drawable abc_vector_test
+<<<<<<< HEAD
 drawable amap_map3d_collapse
 drawable amap_map3d_divider_vertical_bright_opaque
 drawable amap_map3d_down
@@ -689,6 +696,8 @@ drawable amap_map3d_route_history_close
 drawable amap_map3d_shape
 drawable amap_map3d_sousuo
 drawable amap_map3d_title_back
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 drawable btn_checkbox_checked_mtrl
 drawable btn_checkbox_checked_to_unchecked_mtrl_animation
 drawable btn_checkbox_unchecked_mtrl
@@ -783,6 +792,7 @@ id activity_chooser_view_content
 id add
 id alertTitle
 id always
+<<<<<<< HEAD
 id amap_map3d_city_header
 id amap_map3d_city_header_image
 id amap_map3d_city_listview
@@ -812,6 +822,8 @@ id amap_map3d_search_input
 id amap_map3d_search_input_clean
 id amap_map3d_search_input_searchimg
 id amap_map3d_search_listview
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 id androidx_compose_ui_view_composition_context
 id async
 id beginning
@@ -983,11 +995,14 @@ layout abc_search_dropdown_item_icons_2line
 layout abc_search_view
 layout abc_select_dialog_material
 layout abc_tooltip
+<<<<<<< HEAD
 layout amap_map3d_expand_header
 layout amap_map3d_mapdialog_layout
 layout amap_map3d_offlinemap_child
 layout amap_map3d_offlinemap_group
 layout amap_map3d_service_offlinemap_layout
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 layout custom_dialog
 layout fingerprint_dialog_layout
 layout ime_base_split_test_activity
@@ -1031,7 +1046,10 @@ string abc_searchview_description_voice
 string abc_shareactionprovider_share_with
 string abc_shareactionprovider_share_with_application
 string abc_toolbar_collapse_description
+<<<<<<< HEAD
 string amap_map3d_app_name
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 string androidx_startup
 string app_name
 string call_notification_answer_action
@@ -1484,8 +1502,11 @@ style Widget_AppCompat_Toolbar
 style Widget_AppCompat_Toolbar_Button_Navigation
 style Widget_Compat_NotificationActionContainer
 style Widget_Compat_NotificationActionText
+<<<<<<< HEAD
 style amap_map3d_AppBaseTheme
 style amap_map3d_AppTheme
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 styleable ActionBar background backgroundSplit backgroundStacked contentInsetEnd contentInsetEndWithActions contentInsetLeft contentInsetRight contentInsetStart contentInsetStartWithNavigation customNavigationLayout displayOptions divider elevation height hideOnContentScroll homeAsUpIndicator homeLayout icon indeterminateProgressStyle itemPadding logo navigationMode popupTheme progressBarPadding progressBarStyle subtitle subtitleTextStyle title titleTextStyle
 styleable ActionBarLayout android_layout_gravity
 styleable ActionMenuItemView android_minWidth
@@ -1539,4 +1560,7 @@ styleable Toolbar android_gravity android_minHeight buttonGravity collapseConten
 styleable View android_theme android_focusable paddingEnd paddingStart theme
 styleable ViewBackgroundHelper android_background backgroundTint backgroundTintMode
 styleable ViewStubCompat android_id android_layout android_inflatedId
+<<<<<<< HEAD
 styleable amap_map3d_DownloadProgressView amap_map3d_progressColor amap_map3d_progressText amap_map3d_progressTextColor amap_map3d_progressTextSize
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab

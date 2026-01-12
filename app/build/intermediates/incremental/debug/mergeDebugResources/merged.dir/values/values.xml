@@ -191,6 +191,7 @@
     <dimen name="abc_text_size_subtitle_material_toolbar">16dp</dimen>
     <dimen name="abc_text_size_title_material">20sp</dimen>
     <dimen name="abc_text_size_title_material_toolbar">20dp</dimen>
+<<<<<<< HEAD
     <dimen name="amap_map3d_city_name_size">20sp</dimen>
     <dimen name="amap_map3d_city_progress_size">11sp</dimen>
     <dimen name="amap_map3d_city_size_size">12sp</dimen>
@@ -217,6 +218,8 @@
     <dimen name="amap_map3d_trace_spinner_padding">2dp</dimen>
     <dimen name="amap_map3d_width_title_leftImg">30dp</dimen>
     <dimen name="amap_map3d_zero">0dp</dimen>
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
     <dimen name="compat_button_inset_horizontal_material">4dp</dimen>
     <dimen name="compat_button_inset_vertical_material">6dp</dimen>
     <dimen name="compat_button_padding_horizontal_material">8dp</dimen>
@@ -367,7 +370,10 @@
     <string name="abc_shareactionprovider_share_with">Share with</string>
     <string name="abc_shareactionprovider_share_with_application">Share with <ns1:g example="Mail" id="application_name">%s</ns1:g></string>
     <string name="abc_toolbar_collapse_description">Collapse</string>
+<<<<<<< HEAD
     <string name="amap_map3d_app_name">AMapSOSDK</string>
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
     <string name="androidx_startup" translatable="false">androidx.startup</string>
     <string name="app_name">HubLink Navigator</string>
     <string name="call_notification_answer_action">Answer</string>
@@ -1981,12 +1987,15 @@
     <style name="Widget.AppCompat.Toolbar.Button.Navigation" parent="Base.Widget.AppCompat.Toolbar.Button.Navigation"/>
     <style name="Widget.Compat.NotificationActionContainer" parent=""/>
     <style name="Widget.Compat.NotificationActionText" parent=""/>
+<<<<<<< HEAD
     <style name="amap_map3d_AppBaseTheme" parent="android:Theme.Light">
         
     </style>
     <style name="amap_map3d_AppTheme" parent="amap_map3d_AppBaseTheme">
         
     </style>
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
     <declare-styleable name="ActionBar">
         
         <attr name="navigationMode">
@@ -3303,10 +3312,13 @@
         <attr name="android:inflatedId"/>
         <attr name="android:id"/>
     </declare-styleable>
+<<<<<<< HEAD
     <declare-styleable name="amap_map3d_DownloadProgressView">
         <attr format="string" name="amap_map3d_progressText"/>
         <attr format="dimension" name="amap_map3d_progressTextSize"/>
         <attr format="color" name="amap_map3d_progressColor"/>
         <attr format="color" name="amap_map3d_progressTextColor"/>
     </declare-styleable>
+=======
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 </resources>

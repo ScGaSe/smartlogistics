@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #Tue Jan 13 01:50:56 CST 2026
 base.0=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes.dex
 base.1=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\0\\classes.dex
@@ -9,6 +10,19 @@ base.6=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermed
 base.7=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\7\\classes.dex
 base.8=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes2.dex
 base.9=E\:\\SmartLogistics_AndroidProject\\android_project\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes3.dex
+=======
+#Tue Jan 13 01:19:15 CST 2026
+base.0=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes.dex
+base.1=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\0\\classes.dex
+base.2=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\11\\classes.dex
+base.3=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\13\\classes.dex
+base.4=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\14\\classes.dex
+base.5=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\5\\classes.dex
+base.6=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\6\\classes.dex
+base.7=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\7\\classes.dex
+base.8=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes2.dex
+base.9=D\:\\Android Studio\\smartlogistics\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes3.dex
+>>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
 path.0=classes.dex
 path.1=0/classes.dex
 path.2=11/classes.dex
