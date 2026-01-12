@@ -52,6 +52,16 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    // 添加这个配置，强制排除重复类
+    packagingOptions {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            pickFirsts += listOf(
+                "lib/*/libAMapSDK_cl_v1.0.9.so",
+                "lib/*/*.so"
+            )
+        }
+    }
 }
 
 dependencies {
@@ -87,12 +97,18 @@ dependencies {
     
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    
-    // ==================== 高德地图 SDK ====================
-    // 只用3D地图SDK (已包含定位功能，足够基本使用)
-    implementation("com.amap.api:3dmap:10.0.600")
-    // 暂时不引入search SDK，等地图能显示后再添加
-    
+
+    // 生物识别（指纹登录）
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    // 讯飞语音SDK
+    implementation(files("libs/SparkChain.aar"))
+    implementation(files("libs/Codec.aar"))
+
+    // ==================== 高德地图 SDK（合包） ====================
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

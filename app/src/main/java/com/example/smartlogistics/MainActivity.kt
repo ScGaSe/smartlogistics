@@ -1,7 +1,6 @@
 package com.example.smartlogistics
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.*
@@ -20,6 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,13 +31,17 @@ import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.amap.api.maps.MapsInitializer
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     
     private val viewModel: MainViewModel by viewModels()
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 初始化讯飞SDK（队友B添加）
+        initXunfeiSDK()
+
+        // 初始化高德地图隐私合规
         try {
             MapsInitializer.updatePrivacyShow(this, true, true)
             MapsInitializer.updatePrivacyAgree(this, true)
@@ -55,6 +59,26 @@ class MainActivity : ComponentActivity() {
             SmartLogisticsTheme {
                 MainAppEntry(viewModel = viewModel)
             }
+        }
+    }
+
+    // 讯飞SDK初始化（队友B添加）
+    private fun initXunfeiSDK() {
+        try {
+            val config = com.iflytek.sparkchain.core.SparkChainConfig.builder()
+                .appID("a0ede71d")
+                .apiKey("ae2e5348692344a0bc4834e44ec338ff")
+                .apiSecret("ZjM1YWM2OTA5YTRmYTEzMGY5ZWRjNDJk")
+
+            val ret = com.iflytek.sparkchain.core.SparkChain.getInst().init(application, config)
+            android.util.Log.d("XunfeiSDK", "SDK初始化结果: $ret (0=成功)")
+
+            if (ret != 0) {
+                android.util.Log.e("XunfeiSDK", "SDK初始化失败，错误码: $ret")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("XunfeiSDK", "SDK初始化异常: ${e.message}")
+            e.printStackTrace()
         }
     }
 }
@@ -216,7 +240,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                 )
             }
 
-            composable( route = "cargo_report") {
+            composable(route = "cargo_report") {
                 CargoReportScreen(
                     navController = navController,
                     viewModel = viewModel
@@ -311,6 +335,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
+            
             // ==================== AI对话页面 ====================
             composable("ai_chat") {
                 AiChatScreen(

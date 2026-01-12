@@ -56,7 +56,7 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             searchHint = "搜索仓库、货站、限行路段...",
             primaryColor = TruckOrange,
             gradientBrush = Brush.linearGradient(colors = listOf(TruckOrange, TruckOrangeDark)),
-            onSearchClick = { navController.navigate("navigation_map") },
+            onSearchClick = { navController.navigate("navigation_map_new") },
             onAiClick = { navController.navigate("ai_chat") }
         )
         
@@ -266,7 +266,7 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
         Spacer(modifier = Modifier.height(20.dp))
         TipCard(text = "系统将自动避开限高、限重路段，并考虑危化品车辆通行限制。", icon = Icons.Rounded.Info, backgroundColor = TruckOrangeLight, iconColor = TruckOrange)
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map") }, enabled = destination.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Navigation)
+        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map_new") }, enabled = destination.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Navigation)
     }
 }
 

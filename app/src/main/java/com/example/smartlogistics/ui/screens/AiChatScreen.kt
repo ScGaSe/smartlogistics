@@ -182,7 +182,7 @@ fun AiChatScreen(
                         primaryColor = primaryColor,
                         onNavigateClick = { destination ->
                             // 跳转到导航页面
-                            navController.navigate("navigation_map")
+                            navController.navigate("navigation_map_new")
                         }
                     )
                 }

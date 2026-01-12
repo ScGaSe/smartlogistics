@@ -70,7 +70,7 @@ fun CarHomeScreen(
             gradientBrush = Brush.linearGradient(
                 colors = listOf(CarGreen, CarGreenDark)
             ),
-            onSearchClick = { navController.navigate("navigation_map") },
+            onSearchClick = { navController.navigate("navigation_map_new") },
             onAiClick = { navController.navigate("ai_chat") }
         )
         
@@ -373,7 +373,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                         modifier = Modifier
                             .weight(1f)
                             .height(80.dp)
-                            .clickable { navController.navigate("navigation_map") },
+                            .clickable { navController.navigate("navigation_map_new") },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF3B82F6).copy(alpha = 0.1f))
                     ) {
@@ -486,7 +486,7 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         }
         
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map") }, enabled = destination.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Navigation)
+        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map_new") }, enabled = destination.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Navigation)
     }
 }
 
