@@ -32,6 +32,15 @@ import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.TripState
 import java.net.URLEncoder
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.graphics.Bitmap
+import kotlinx.coroutines.*
+import com.example.smartlogistics.utils.TFLiteHelper
 
 // ==================== 私家车主主页 ====================
 @Composable
@@ -224,17 +233,81 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     val vehicleState by viewModel?.vehicleState?.collectAsState() ?: remember { mutableStateOf(VehicleState.Idle) }
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val isLoading = vehicleState is VehicleState.Loading
-    
-    LaunchedEffect(vehicleState) {
-        if (vehicleState is VehicleState.BindSuccess) { plateNumber = ""; viewModel?.resetVehicleState() }
+
+    // 车牌识别相关状态
+    var showImagePicker by remember { mutableStateOf(false) }
+    var showCamera by remember { mutableStateOf(false) }
+    var isRecognizing by remember { mutableStateOf(false) }
+    var recognitionResult by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    val tfliteHelper = remember { TFLiteHelper(context) }
+
+    // 图片选择器
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            isRecognizing = true
+            // 在协程中执行识别
+            CoroutineScope(Dispatchers.IO).launch {
+                val bitmap = tfliteHelper.loadImageFromUri(it)
+                val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
+
+                withContext(Dispatchers.Main) {
+                    isRecognizing = false
+                    result?.let { plate ->
+                        plateNumber = plate
+                        recognitionResult = "识别成功: $plate"
+                    }
+                }
+            }
+        }
     }
-    
+
+    // 相机拍照
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        bitmap?.let {
+            isRecognizing = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val result = tfliteHelper.recognizePlate(it)
+
+                withContext(Dispatchers.Main) {
+                    isRecognizing = false
+                    plateNumber = result
+                    recognitionResult = "识别成功: $result"
+                }
+            }
+        }
+    }
+
+    // 相机权限请求
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            cameraLauncher.launch(null)
+        } else {
+            recognitionResult = "需要相机权限才能拍照识别"
+        }
+    }
+
+    LaunchedEffect(vehicleState) {
+        if (vehicleState is VehicleState.BindSuccess) {
+            plateNumber = ""
+            recognitionResult = null
+            viewModel?.resetVehicleState()
+        }
+    }
+
     DetailScreenTemplate(navController = navController, title = "车辆绑定", backgroundColor = BackgroundPrimary) {
         // 过滤无效车辆数据
-        val validVehicles = vehicles.filter { 
-            it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true) 
+        val validVehicles = vehicles.filter {
+            it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true)
         }
-        
+
         if (validVehicles.isNotEmpty()) {
             Text(text = "已绑定车辆", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
             Spacer(modifier = Modifier.height(12.dp))
@@ -258,19 +331,143 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
-        
+
         Text(text = "添加新车辆", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
-        
+
         Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Card(modifier = Modifier.fillMaxWidth().clickable { }, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "AI智能识别车牌", fontSize = 15.sp, color = CarGreen, fontWeight = FontWeight.Medium)
+                // AI识别按钮组
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // 拍照识别
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                when (PackageManager.PERMISSION_GRANTED) {
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.CAMERA
+                                    ) -> {
+                                        cameraLauncher.launch(null)
+                                    }
+                                    else -> {
+                                        cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                                    }
+                                }
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CameraAlt,
+                                contentDescription = null,
+                                tint = CarGreen,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "拍照识别",
+                                fontSize = 15.sp,
+                                color = CarGreen,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // 相册选择
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { imagePickerLauncher.launch("image/*") },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Photo,
+                                contentDescription = null,
+                                tint = CarGreen,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "相册选择",
+                                fontSize = 15.sp,
+                                color = CarGreen,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
+
+                // 识别状态显示
+                if (isRecognizing) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = CarGreen,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "正在识别车牌...",
+                            fontSize = 13.sp,
+                            color = CarGreen
+                        )
+                    }
+                }
+
+                // 识别结果显示
+                recognitionResult?.let { result ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = CarGreen,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = result,
+                            fontSize = 13.sp,
+                            color = CarGreen,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(text = "或手动输入", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.align(Alignment.CenterHorizontally))
                 Spacer(modifier = Modifier.height(16.dp))
@@ -287,26 +484,24 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
         Spacer(modifier = Modifier.height(24.dp))
         PrimaryButton(text = "绑定车辆", onClick = { viewModel?.bindVehicle(plateNumber, vehicleType) }, isLoading = isLoading, enabled = plateNumber.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Add)
-        
-        // ==================== 寻车助手模块 ====================
+
+        // ==================== 寻车助手模块 (保持原样) ====================
         Spacer(modifier = Modifier.height(32.dp))
         Text(text = "寻车助手", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
-        
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // 记录停车位置区域
                 Text(text = "记录停车位置", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 标记位置按钮
                     Card(
                         modifier = Modifier
                             .weight(1f)
@@ -330,8 +525,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                             Text(text = "标记位置", fontSize = 13.sp, color = CarGreen, fontWeight = FontWeight.Medium)
                         }
                     }
-                    
-                    // 拍照记录按钮
+
                     Card(
                         modifier = Modifier
                             .weight(1f)
@@ -356,24 +550,22 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(20.dp))
                 HorizontalDivider(color = BorderLight)
                 Spacer(modifier = Modifier.height(20.dp))
-                
-                // 找车区域
+
                 Text(text = "找车", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 导航找车按钮
                     Card(
                         modifier = Modifier
                             .weight(1f)
                             .height(80.dp)
-                            .clickable { navController.navigate("navigation_map_new") },
+                            .clickable { navController.navigate("navigation_map") },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF3B82F6).copy(alpha = 0.1f))
                     ) {
@@ -392,8 +584,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                             Text(text = "导航找车", fontSize = 13.sp, color = Color(0xFF3B82F6), fontWeight = FontWeight.Medium)
                         }
                     }
-                    
-                    // 查看照片按钮
+
                     Card(
                         modifier = Modifier
                             .weight(1f)
@@ -418,9 +609,8 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                // 提示信息
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -436,12 +626,19 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "停车后记录位置，方便您快速找到爱车",
+                        text = "停车后记录位置,方便您快速找到爱车",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
                 }
             }
+        }
+    }
+
+    // 清理资源
+    DisposableEffect(Unit) {
+        onDispose {
+            tfliteHelper.close()
         }
     }
 }
