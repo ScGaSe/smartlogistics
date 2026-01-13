@@ -64,21 +64,26 @@ class MainActivity : FragmentActivity() {
 
     // 讯飞SDK初始化（队友B添加）
     private fun initXunfeiSDK() {
+        // 检查是否是模拟器（x86架构），如果是则跳过初始化
+        val isEmulator = android.os.Build.SUPPORTED_ABIS.any {
+            it.contains("x86")
+        }
+
+        if (isEmulator) {
+            android.util.Log.w("XunfeiSDK", "模拟器不支持讯飞SDK，跳过初始化")
+            return
+        }
+
         try {
             val config = com.iflytek.sparkchain.core.SparkChainConfig.builder()
                 .appID("a0ede71d")
                 .apiKey("ae2e5348692344a0bc4834e44ec338ff")
-                .apiSecret("ZjM1YWM2OTA5YTRmYTEzMGY5ZWRjNDJk")
+                .apiSecret("ZjM1YWM2OTA5YTRmYTEzMGY1ZWRjNDJk")
 
             val ret = com.iflytek.sparkchain.core.SparkChain.getInst().init(application, config)
             android.util.Log.d("XunfeiSDK", "SDK初始化结果: $ret (0=成功)")
-
-            if (ret != 0) {
-                android.util.Log.e("XunfeiSDK", "SDK初始化失败，错误码: $ret")
-            }
         } catch (e: Exception) {
             android.util.Log.e("XunfeiSDK", "SDK初始化异常: ${e.message}")
-            e.printStackTrace()
         }
     }
 }
