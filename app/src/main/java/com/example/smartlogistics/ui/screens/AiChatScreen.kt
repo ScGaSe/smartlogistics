@@ -247,24 +247,11 @@ fun AiChatScreen(
                             }
                         )
                     }
-<<<<<<< HEAD
-                }
-                
-                // 消息列表
-                items(messages) { message ->
-                    ChatBubble(
-                        message = message,
-                        primaryColor = primaryColor,
-                        onNavigateClick = { destination ->
-                            // 跳转到导航页面
-                            navController.navigate("navigation_map_new")
-=======
 
                     // 加载中
                     if (isLoading) {
                         item {
                             TypingIndicator()
->>>>>>> 3a884642b16cc6e6af1d4d3ea8697fee44ce37ab
                         }
                     }
                 }
