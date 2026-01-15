@@ -1,5 +1,13 @@
 package com.example.smartlogistics.ui.screens
 
+import android.Manifest
+import android.R.attr.text
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,14 +25,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.ReportState
@@ -339,6 +350,9 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
 // ==================== 货物报备页面 ====================
 @Composable
 fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+
+    // 表单状态
     var cargoType by remember { mutableStateOf("普通货物") }
     var isHazardous by remember { mutableStateOf(false) }
     var hazardClass by remember { mutableStateOf("") }
@@ -349,9 +363,95 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     var selectedVehicleId by remember { mutableStateOf("") }
     val isLoading = reportState is ReportState.Loading
-    
-    LaunchedEffect(reportState) { if (reportState is ReportState.SubmitSuccess) { navController.popBackStack() } }
-    
+
+    // ========== 语音识别相关状态 ==========
+    val speechHelper = remember { XunfeiSpeechHelper() }
+    val speechState by speechHelper.state.collectAsState()
+    val volumeLevel by speechHelper.volumeLevel.collectAsState()
+    val partialText by speechHelper.partialText.collectAsState()
+    var showVoiceDialog by remember { mutableStateOf(false) }
+
+    // 权限处理
+    var hasRecordPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            hasRecordPermission = isGranted
+            if (isGranted) {
+                showVoiceDialog = true
+                speechHelper.startListening()
+            } else {
+                Toast.makeText(context, "需要录音权限才能使用语音功能", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    // 处理语音识别结果 - 智能解析并填充表单
+    LaunchedEffect(speechState) {
+        when (speechState) {
+            is XunfeiSpeechHelper.SpeechState.Result -> {
+                val text = (speechState as XunfeiSpeechHelper.SpeechState.Result).text
+                if (text.isNotBlank()) {
+                    // 智能解析语音内容
+                    val parsed = parseVoiceContent(text)
+
+                    // 填充解析结果到表单
+                    parsed.cargoType?.let {
+                        cargoType = it
+                        isHazardous = it == "危险品"
+                    }
+                    parsed.weight?.let { weight = it }
+                    parsed.destination?.let { destination = it }
+                    parsed.hazardClass?.let { hazardClass = it }
+                    parsed.description?.let { description = it }
+
+                    // 显示解析结果提示
+                    val filledFields = mutableListOf<String>()
+                    if (parsed.cargoType != null) filledFields.add("货物类型")
+                    if (parsed.weight != null) filledFields.add("重量")
+                    if (parsed.destination != null) filledFields.add("目的地")
+
+                    if (filledFields.isNotEmpty()) {
+                        Toast.makeText(
+                            context,
+                            "已识别: ${filledFields.joinToString("、")}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                showVoiceDialog = false
+                speechHelper.resetState()
+            }
+            is XunfeiSpeechHelper.SpeechState.Error -> {
+                val error = (speechState as XunfeiSpeechHelper.SpeechState.Error).message
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                showVoiceDialog = false
+                speechHelper.resetState()
+            }
+            else -> {}
+        }
+    }
+
+    // 释放资源
+    DisposableEffect(Unit) {
+        onDispose {
+            speechHelper.destroy()
+        }
+    }
+    // ========== 语音识别相关状态结束 ==========
+
+    LaunchedEffect(reportState) {
+        if (reportState is ReportState.SubmitSuccess) {
+            navController.popBackStack()
+        }
+    }
+
     DetailScreenTemplate(navController = navController, title = "货物报备", backgroundColor = BackgroundPrimary) {
         Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -362,10 +462,17 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = "选择车辆", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                    
-                    // 语音填写按钮
+
+                    // 语音填写按钮 - 改为触发语音识别
                     Surface(
-                        modifier = Modifier.clickable { navController.navigate("ai_chat") },
+                        modifier = Modifier.clickable {
+                            if (hasRecordPermission) {
+                                showVoiceDialog = true
+                                speechHelper.startListening()
+                            } else {
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
                         shape = RoundedCornerShape(20.dp),
                         color = TruckOrange.copy(alpha = 0.1f)
                     ) {
@@ -389,14 +496,14 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
-                // 过滤无效车辆数据 (包含 "string" 的都过滤掉)
-                val validVehicles = vehicles.filter { 
-                    it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true) 
+
+                // 过滤无效车辆数据
+                val validVehicles = vehicles.filter {
+                    it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true)
                 }
-                
+
                 if (validVehicles.isEmpty()) {
                     Card(modifier = Modifier.fillMaxWidth().clickable { navController.navigate("truck_bind") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -408,42 +515,404 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(validVehicles) { vehicle ->
-                            FilterChip(selected = selectedVehicleId == vehicle.vehicleId, onClick = { selectedVehicleId = vehicle.vehicleId ?: "" }, label = { Text(vehicle.plateNumber) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TruckOrange.copy(alpha = 0.2f), selectedLabelColor = TruckOrange))
+                            FilterChip(
+                                selected = selectedVehicleId == vehicle.vehicleId,
+                                onClick = { selectedVehicleId = vehicle.vehicleId ?: "" },
+                                label = { Text(vehicle.plateNumber) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = TruckOrange.copy(alpha = 0.2f),
+                                    selectedLabelColor = TruckOrange
+                                )
+                            )
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(text = "货物类型", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("普通货物", "冷链货物", "危险品").forEach { type ->
-                        FilterChip(selected = cargoType == type, onClick = { cargoType = type; isHazardous = type == "危险品" }, label = { Text(type) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (type == "危险品") ErrorRed.copy(alpha = 0.2f) else TruckOrange.copy(alpha = 0.2f), selectedLabelColor = if (type == "危险品") ErrorRed else TruckOrange))
+                        FilterChip(
+                            selected = cargoType == type,
+                            onClick = { cargoType = type; isHazardous = type == "危险品" },
+                            label = { Text(type) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = if (type == "危险品") ErrorRed.copy(alpha = 0.2f) else TruckOrange.copy(alpha = 0.2f),
+                                selectedLabelColor = if (type == "危险品") ErrorRed else TruckOrange
+                            )
+                        )
                     }
                 }
+
                 if (isHazardous) {
                     Spacer(modifier = Modifier.height(16.dp))
                     TipCard(text = "危化品运输需要特殊审批。", icon = Icons.Rounded.Warning, backgroundColor = ErrorRedLight, iconColor = ErrorRed)
                     Spacer(modifier = Modifier.height(12.dp))
                     StyledTextField(value = hazardClass, onValueChange = { hazardClass = it }, label = "危化品类别", leadingIcon = Icons.Rounded.Warning)
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
                 StyledTextField(value = weight, onValueChange = { weight = it }, label = "货物重量 (吨)", leadingIcon = Icons.Rounded.Scale, keyboardType = KeyboardType.Decimal)
                 Spacer(modifier = Modifier.height(16.dp))
                 StyledTextField(value = destination, onValueChange = { destination = it }, label = "目的地", leadingIcon = Icons.Rounded.LocationOn)
             }
         }
-        
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 语音提示卡片
+        TipCard(
+            text = "点击「语音填写」，说出货物信息，例如：10吨普通货物送到3号仓库",
+            icon = Icons.Rounded.Lightbulb,
+            backgroundColor = TruckOrangeLight,
+            iconColor = TruckOrange
+        )
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // 提交报备按钮
         PrimaryButton(
             text = "提交报备",
-            onClick = { viewModel?.submitReport(selectedVehicleId, destination, cargoType, isHazardous, hazardClass.ifBlank { null }, weight.toDoubleOrNull(), description.ifBlank { null }) },
+            onClick = {
+                viewModel?.submitReport(
+                    selectedVehicleId,
+                    destination,
+                    cargoType,
+                    isHazardous,
+                    hazardClass.ifBlank { null },
+                    weight.toDoubleOrNull(),
+                    description.ifBlank { null }
+                )
+            },
             isLoading = isLoading,
             enabled = selectedVehicleId.isNotBlank() && destination.isNotBlank(),
             backgroundColor = TruckOrange,
             icon = Icons.Rounded.Send
         )
+    }
+
+    // 语音识别弹窗
+    if (showVoiceDialog) {
+        CargoVoiceDialog(
+            partialText = partialText,
+            volumeLevel = volumeLevel,
+            isListening = speechState is XunfeiSpeechHelper.SpeechState.Listening,
+            isProcessing = speechState is XunfeiSpeechHelper.SpeechState.Processing,
+            onFinish = { speechHelper.stopListening() },
+            onCancel = {
+                speechHelper.cancel()
+                showVoiceDialog = false
+            }
+        )
+    }
+}
+
+// ==================== 语音内容解析结果 ====================
+private data class ParsedCargoInfo(
+    val cargoType: String? = null,
+    val weight: String? = null,
+    val destination: String? = null,
+    val hazardClass: String? = null,
+    val description: String? = null
+)
+
+// ==================== 智能解析语音内容 ====================
+private fun parseVoiceContent(text: String): ParsedCargoInfo {
+    var cargoType: String? = null
+    var weight: String? = null
+    var destination: String? = null
+    var hazardClass: String? = null
+    var description: String? = null
+
+    val lowerText = text.lowercase()
+
+    // 解析货物类型
+    when {
+        lowerText.contains("危险") || lowerText.contains("危化") || lowerText.contains("化学") -> {
+            cargoType = "危险品"
+            // 尝试提取危化品类别
+            val hazardPatterns = listOf(
+                "易燃", "易爆", "腐蚀", "有毒", "放射",
+                "氧化", "压缩气体", "液化气体"
+            )
+            hazardPatterns.forEach { pattern ->
+                if (lowerText.contains(pattern)) {
+                    hazardClass = pattern
+                }
+            }
+        }
+        lowerText.contains("冷链") || lowerText.contains("冷藏") ||
+                lowerText.contains("生鲜") || lowerText.contains("冷冻") -> {
+            cargoType = "冷链货物"
+        }
+        lowerText.contains("普通") || lowerText.contains("一般") -> {
+            cargoType = "普通货物"
+        }
+    }
+
+    // 解析重量 - 支持多种表达方式
+    val weightPatterns = listOf(
+        Regex("(\\d+(?:\\.\\d+)?)\\s*吨"),
+        Regex("(\\d+(?:\\.\\d+)?)\\s*t", RegexOption.IGNORE_CASE),
+        Regex("(\\d+(?:\\.\\d+)?)\\s*公斤").let { regex ->
+            regex.find(text)?.let { match ->
+                val kg = match.groupValues[1].toDoubleOrNull() ?: 0.0
+                return@let Regex("").also { weight = String.format("%.2f", kg / 1000) }
+            }
+            null
+        }
+    )
+
+    if (weight == null) {
+        weightPatterns.filterNotNull().forEach { pattern ->
+            pattern.find(text)?.let { match ->
+                weight = match.groupValues[1]
+                return@forEach
+            }
+        }
+    }
+
+    // 解析目的地
+    val destinationPatterns = listOf(
+        Regex("(?:送到|运到|去|到达?|目的地[是为]?)\\s*([\\u4e00-\\u9fa5A-Za-z0-9]+(?:号)?(?:仓库|货站|门|闸口|停车场|园区)?)"),
+        Regex("([\\u4e00-\\u9fa5]+(?:号)?仓库)"),
+        Regex("([\\u4e00-\\u9fa5]+货站)"),
+        Regex("([A-Za-z]?\\d+号?)\\s*(?:仓|库|门|闸)")
+    )
+
+    destinationPatterns.forEach { pattern ->
+        pattern.find(text)?.let { match ->
+            val dest = match.groupValues[1].trim()
+            if (dest.isNotBlank() && dest.length >= 2) {
+                destination = dest
+                return@forEach
+            }
+        }
+    }
+
+    // 如果没有匹配到特定格式，尝试提取包含"仓库"、"货站"等关键词的部分
+    if (destination == null) {
+        val keywords = listOf("仓库", "货站", "号门", "闸口", "停车场", "园区")
+        keywords.forEach { keyword ->
+            if (text.contains(keyword)) {
+                val index = text.indexOf(keyword)
+                val start = maxOf(0, index - 5)
+                val end = minOf(text.length, index + keyword.length)
+                destination = text.substring(start, end).trim()
+                return@forEach
+            }
+        }
+    }
+
+    return ParsedCargoInfo(
+        cargoType = cargoType,
+        weight = weight,
+        destination = destination,
+        hazardClass = hazardClass,
+        description = description
+    )
+}
+
+// ==================== 货物报备语音弹窗 ====================
+@Composable
+private fun CargoVoiceDialog(
+    partialText: String,
+    volumeLevel: Float,
+    isListening: Boolean,
+    isProcessing: Boolean,
+    onFinish: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.5f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .width(320.dp)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 标题
+                Text(
+                    text = "语音填写报备信息",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "请说出货物类型、重量、目的地",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 麦克风图标区域
+                Box(
+                    modifier = Modifier.size(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // 外圈 - 根据音量变化
+                    if (isListening) {
+                        val animatedSize by animateFloatAsState(
+                            targetValue = 80f + volumeLevel * 20f,
+                            animationSpec = tween(100),
+                            label = "size"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(animatedSize.dp)
+                                .background(
+                                    TruckOrange.copy(alpha = 0.2f),
+                                    CircleShape
+                                )
+                        )
+                    }
+
+                    // 麦克风图标
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .background(TruckOrange, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isProcessing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = Color.White,
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Mic,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 音量指示条
+                if (isListening) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        repeat(5) { index ->
+                            val baseHeight = when (index) {
+                                2 -> 20f
+                                1, 3 -> 14f
+                                else -> 8f
+                            }
+                            val height = baseHeight * (0.4f + volumeLevel * 0.6f)
+
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .height(height.dp)
+                                    .background(
+                                        TruckOrange.copy(alpha = 0.6f + volumeLevel * 0.4f),
+                                        RoundedCornerShape(2.dp)
+                                    )
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // 实时识别文字显示区域
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 60.dp, max = 120.dp)
+                        .background(
+                            Color(0xFFF5F5F5),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (partialText.isNotBlank()) {
+                        Text(
+                            text = partialText,
+                            fontSize = 15.sp,
+                            color = TextPrimary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 22.sp
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = when {
+                                    isProcessing -> "识别中..."
+                                    isListening -> "请说话..."
+                                    else -> "准备中..."
+                                },
+                                fontSize = 14.sp,
+                                color = TextTertiary,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "例如：10吨普通货物送到3号仓库",
+                                fontSize = 12.sp,
+                                color = TextTertiary.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 按钮区域
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // 取消按钮
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = TextSecondary
+                        )
+                    ) {
+                        Text("取消", fontSize = 14.sp)
+                    }
+
+                    // 完成按钮
+                    Button(
+                        onClick = onFinish,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = TruckOrange
+                        ),
+                        enabled = isListening
+                    ) {
+                        Text("完成", fontSize = 14.sp)
+                    }
+                }
+            }
+        }
     }
 }

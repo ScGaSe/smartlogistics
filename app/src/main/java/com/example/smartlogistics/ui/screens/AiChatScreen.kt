@@ -66,25 +66,14 @@ fun AiChatScreen(
     val partialText by speechHelper.partialText.collectAsState()
     var showVoiceDialog by remember { mutableStateOf(false) }
 
-    // 权限请求
-    var hasRecordPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                    PackageManager.PERMISSION_GRANTED
-        )
-    }
+    // 权限检查（不使用动态请求，避免 requestCode bug）
+    var showPermissionDialog by remember { mutableStateOf(false) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasRecordPermission = isGranted
-        if (isGranted) {
-            // 获得权限后自动开始录音
-            showVoiceDialog = true
-            speechHelper.startListening()
-        } else {
-            Toast.makeText(context, "需要录音权限才能使用语音功能", Toast.LENGTH_SHORT).show()
-        }
+    fun hasRecordPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     // 处理语音识别结果
@@ -264,11 +253,11 @@ fun AiChatScreen(
                     onInputChange = { inputText = it },
                     primaryColor = primaryColor,
                     onVoiceClick = {
-                        if (hasRecordPermission) {
+                        if (hasRecordPermission()) {
                             showVoiceDialog = true
                             speechHelper.startListening()
                         } else {
-                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            showPermissionDialog = true
                         }
                     },
                     onSend = {
@@ -298,6 +287,34 @@ fun AiChatScreen(
                     }
                 )
             }
+        }
+
+        // 权限提示对话框
+        if (showPermissionDialog) {
+            AlertDialog(
+                onDismissRequest = { showPermissionDialog = false },
+                title = { Text("需要录音权限", fontWeight = FontWeight.Bold) },
+                text = { Text("请在系统设置中允许本应用使用麦克风，才能使用语音功能") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showPermissionDialog = false
+                            val intent = android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.fromParts("package", context.packageName, null)
+                            )
+                            context.startActivity(intent)
+                        }
+                    ) {
+                        Text("去设置", color = primaryColor)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPermissionDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
     }
 }
