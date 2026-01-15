@@ -44,10 +44,6 @@ import com.amap.api.services.poisearch.PoiResult
 import com.amap.api.services.poisearch.PoiSearch
 import com.amap.api.services.route.*
 import android.graphics.Color as AndroidColor
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 // ==================== 地图导航页面 (高德地图版) ====================
 @Composable
@@ -268,93 +264,75 @@ fun NavigationMapScreen(
                             singleLine = true
                         )
                         
-                        // ★ 搜索按钮 - 使用HTTP Web API进行POI搜索
+                        // ★ 搜索按钮 - 真正的POI搜索
                         if (destination.isNotBlank() && selectedPoi == null) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
+                                    // ★★★ 调试：获取运行时SHA1（确认后删除这段代码）★★★
+                                    try {
+                                        @Suppress("DEPRECATION")
+                                        val packageInfo = context.packageManager.getPackageInfo(
+                                            context.packageName,
+                                            android.content.pm.PackageManager.GET_SIGNATURES
+                                        )
+                                        for (signature in packageInfo.signatures) {
+                                            val md = java.security.MessageDigest.getInstance("SHA1")
+                                            md.update(signature.toByteArray())
+                                            val sha1 = md.digest().joinToString(":") { "%02X".format(it) }
+                                            android.util.Log.e("SHA1_DEBUG", "========================================")
+                                            android.util.Log.e("SHA1_DEBUG", "运行时SHA1: $sha1")
+                                            android.util.Log.e("SHA1_DEBUG", "PackageName: ${context.packageName}")
+                                            android.util.Log.e("SHA1_DEBUG", "========================================")
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("SHA1_DEBUG", "获取SHA1失败: ${e.message}")
+                                    }
+                                    // ★★★ 调试代码结束 ★★★
+                                    
                                     isSearching = true
                                     
-                                    // ★★★ 使用HTTP直接调用高德Web API ★★★
-                                    val webApiKey = "ac45277c98cc805f0fdac3fda70d088c"  // Web服务Key
-                                    val encodedKeyword = java.net.URLEncoder.encode(destination, "UTF-8")
-                                    val url = "https://restapi.amap.com/v3/place/text?key=$webApiKey&keywords=$encodedKeyword&offset=20&page=1&extensions=all"
+                                    // ★★★ 简化版POI搜索 - 只用关键字搜索，不设置额外参数 ★★★
+                                    // 参数1: 关键字
+                                    // 参数2: POI类型（空=全部类型）
+                                    // 参数3: 城市（空字符串=全国搜索）
+                                    val query = PoiSearch.Query(destination, "", "")
+                                    query.pageSize = 20
+                                    query.pageNum = 0
+                                    query.cityLimit = false  // 不限制城市
                                     
-                                    // 在协程中执行网络请求
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        try {
-                                            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                                            connection.requestMethod = "GET"
-                                            connection.connectTimeout = 10000
-                                            connection.readTimeout = 10000
+                                    val poiSearch = PoiSearch(context, query)
+                                    
+                                    poiSearch.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
+                                        override fun onPoiSearched(result: PoiResult?, code: Int) {
+                                            isSearching = false
+                                            android.util.Log.d("POISearch", "搜索结果: code=$code, 结果数=${result?.pois?.size ?: 0}")
                                             
-                                            val responseCode = connection.responseCode
-                                            if (responseCode == 200) {
-                                                val response = connection.inputStream.bufferedReader().readText()
-                                                android.util.Log.d("POI_HTTP", "响应: $response")
-                                                
-                                                // 解析JSON
-                                                val jsonObject = org.json.JSONObject(response)
-                                                val status = jsonObject.optString("status")
-                                                
-                                                withContext(Dispatchers.Main) {
-                                                    isSearching = false
-                                                    if (status == "1") {
-                                                        val pois = jsonObject.optJSONArray("pois")
-                                                        if (pois != null && pois.length() > 0) {
-                                                            // 转换为PoiItem列表
-                                                            val poiList = mutableListOf<PoiItem>()
-                                                            for (i in 0 until pois.length()) {
-                                                                val poi = pois.getJSONObject(i)
-                                                                val name = poi.optString("name")
-                                                                val address = poi.optString("address")
-                                                                val location = poi.optString("location")  // "经度,纬度"
-                                                                val cityName = poi.optString("cityname")
-                                                                
-                                                                if (location.contains(",")) {
-                                                                    val coords = location.split(",")
-                                                                    val lng = coords[0].toDoubleOrNull() ?: 0.0
-                                                                    val lat = coords[1].toDoubleOrNull() ?: 0.0
-                                                                    
-                                                                    val poiItem = PoiItem(
-                                                                        poi.optString("id"),
-                                                                        LatLonPoint(lat, lng),
-                                                                        name,
-                                                                        address
-                                                                    )
-                                                                    poiItem.cityName = cityName
-                                                                    poiList.add(poiItem)
-                                                                }
-                                                            }
-                                                            searchResults = poiList
-                                                            showSearchResults = poiList.isNotEmpty()
-                                                            android.util.Log.d("POI_HTTP", "找到 ${poiList.size} 个结果")
-                                                        } else {
-                                                            searchResults = emptyList()
-                                                            showSearchResults = false
-                                                            Toast.makeText(context, "未找到相关地点", Toast.LENGTH_SHORT).show()
-                                                        }
+                                            when (code) {
+                                                AMapException.CODE_AMAP_SUCCESS -> {
+                                                    if (result?.pois != null && result.pois.isNotEmpty()) {
+                                                        searchResults = result.pois
+                                                        showSearchResults = true
                                                     } else {
-                                                        val info = jsonObject.optString("info")
-                                                        android.util.Log.e("POI_HTTP", "搜索失败: $info")
-                                                        Toast.makeText(context, "搜索失败: $info", Toast.LENGTH_SHORT).show()
+                                                        searchResults = emptyList()
+                                                        showSearchResults = false
+                                                        Toast.makeText(context, "未找到相关地点", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
-                                            } else {
-                                                withContext(Dispatchers.Main) {
-                                                    isSearching = false
-                                                    Toast.makeText(context, "网络请求失败: $responseCode", Toast.LENGTH_SHORT).show()
+                                                1008 -> {
+                                                    // Key配置问题
+                                                    android.util.Log.e("POISearch", "错误1008: Key配置问题，请检查SHA1和PackageName")
+                                                    Toast.makeText(context, "服务配置错误，请检查API Key", Toast.LENGTH_LONG).show()
+                                                }
+                                                else -> {
+                                                    android.util.Log.e("POISearch", "搜索失败: code=$code")
+                                                    Toast.makeText(context, "搜索失败(错误码:$code)", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
-                                            connection.disconnect()
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("POI_HTTP", "异常: ${e.message}")
-                                            withContext(Dispatchers.Main) {
-                                                isSearching = false
-                                                Toast.makeText(context, "搜索异常: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
                                         }
-                                    }
+                                        override fun onPoiItemSearched(item: PoiItem?, code: Int) {}
+                                    })
+                                    poiSearch.searchPOIAsyn()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
