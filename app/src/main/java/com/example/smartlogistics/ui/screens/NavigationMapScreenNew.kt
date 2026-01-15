@@ -111,14 +111,13 @@ fun NavigationMapScreenNew(
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
     }
 
-    LaunchedEffect(Unit) {
-        if (!hasLocationPermission) {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+// 如果没有权限，显示提示让用户点击
+    var shouldRequestPermission by remember { mutableStateOf(!hasLocationPermission) }
+
+    if (shouldRequestPermission && !hasLocationPermission) {
+        LaunchedEffect(Unit) {
+            // 延迟一下再请求，避免 requestCode 问题
+            kotlinx.coroutines.delay(100)
         }
     }
     
@@ -681,13 +680,18 @@ private fun searchPoi(context: Context, keyword: String, onResult: (List<PoiItem
     val query = PoiSearch.Query(keyword, "", "")
     query.pageSize = 20
     query.pageNum = 0
-    
+
     val search = PoiSearch(context, query)
     search.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
         override fun onPoiSearched(result: PoiResult?, code: Int) {
-            if (code == AMapException.CODE_AMAP_SUCCESS && result?.pois != null) {
-                onResult(result.pois)
+            android.util.Log.d("POI_SEARCH", "搜索结果 code: $code, 关键词: $keyword")
+
+            if (code == AMapException.CODE_AMAP_SUCCESS) {
+                val pois = result?.pois ?: emptyList()
+                android.util.Log.d("POI_SEARCH", "找到 ${pois.size} 个结果")
+                onResult(pois)
             } else {
+                android.util.Log.e("POI_SEARCH", "搜索失败，错误码: $code")
                 onResult(emptyList())
             }
         }
@@ -695,7 +699,6 @@ private fun searchPoi(context: Context, keyword: String, onResult: (List<PoiItem
     })
     search.searchPOIAsyn()
 }
-
 // ==================== 路线规划 ====================
 
 private fun searchDriveRoute(context: Context, start: LatLonPoint, end: LatLonPoint, onResult: (List<DrivePath>) -> Unit) {
