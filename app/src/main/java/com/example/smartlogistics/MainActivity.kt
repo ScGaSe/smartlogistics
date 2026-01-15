@@ -32,9 +32,9 @@ import com.example.smartlogistics.viewmodel.MainViewModel
 import com.amap.api.maps.MapsInitializer
 
 class MainActivity : FragmentActivity() {
-    
+
     private val viewModel: MainViewModel by viewModels()
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -54,7 +54,7 @@ class MainActivity : FragmentActivity() {
             context = applicationContext,
             useMock = true // 开发阶段使用Mock
         )
-        
+
         setContent {
             SmartLogisticsTheme {
                 MainAppEntry(viewModel = viewModel)
@@ -64,26 +64,21 @@ class MainActivity : FragmentActivity() {
 
     // 讯飞SDK初始化（队友B添加）
     private fun initXunfeiSDK() {
-        // 检查是否是模拟器（x86架构），如果是则跳过初始化
-        val isEmulator = android.os.Build.SUPPORTED_ABIS.any {
-            it.contains("x86")
-        }
-
-        if (isEmulator) {
-            android.util.Log.w("XunfeiSDK", "模拟器不支持讯飞SDK，跳过初始化")
-            return
-        }
-
         try {
             val config = com.iflytek.sparkchain.core.SparkChainConfig.builder()
                 .appID("a0ede71d")
                 .apiKey("ae2e5348692344a0bc4834e44ec338ff")
-                .apiSecret("ZjM1YWM2OTA5YTRmYTEzMGY1ZWRjNDJk")
+                .apiSecret("ZjM1YWM2OTA5YTRmYTEzMGY5ZWRjNDJk")
 
             val ret = com.iflytek.sparkchain.core.SparkChain.getInst().init(application, config)
             android.util.Log.d("XunfeiSDK", "SDK初始化结果: $ret (0=成功)")
+
+            if (ret != 0) {
+                android.util.Log.e("XunfeiSDK", "SDK初始化失败，错误码: $ret")
+            }
         } catch (e: Exception) {
             android.util.Log.e("XunfeiSDK", "SDK初始化异常: ${e.message}")
+            e.printStackTrace()
         }
     }
 }
@@ -94,17 +89,17 @@ fun MainAppEntry(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    
+
     // 当前用户主页路由
     var userHomeRoute by remember { mutableStateOf("car_home") }
-    
+
     // 底部导航配置
     val bottomItems = listOf(
         BottomNavItem("主页", userHomeRoute, Icons.Rounded.Home),
         BottomNavItem("导航", "navigation_map", Icons.Rounded.Navigation),
         BottomNavItem("我的", "user_profile", Icons.Rounded.Person)
     )
-    
+
     // 显示底部导航栏的页面
     val showBottomBar = currentRoute in listOf(
         "truck_home",
@@ -112,12 +107,12 @@ fun MainAppEntry(viewModel: MainViewModel) {
         "navigation_map",
         "user_profile"
     )
-    
+
     // 根据当前模式决定主色
-    val isProfessionalMode = currentRoute?.startsWith("truck") == true || 
-                             userHomeRoute == "truck_home"
+    val isProfessionalMode = currentRoute?.startsWith("truck") == true ||
+            userHomeRoute == "truck_home"
     val primaryColor = if (isProfessionalMode) TruckOrange else CarGreen
-    
+
     Scaffold(
         bottomBar = {
             AnimatedVisibility(
@@ -138,7 +133,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                         } else {
                             currentRoute == item.route
                         }
-                        
+
                         NavigationBarItem(
                             icon = {
                                 Icon(
@@ -194,14 +189,14 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     }
                 )
             }
-            
+
             composable("register") {
                 RegisterScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             // ==================== 货车司机模块 ====================
             composable("truck_home") {
                 TruckHomeScreen(
@@ -209,35 +204,35 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             composable("truck_bind") {
                 TruckBindScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("truck_route") {
                 TruckRouteScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("truck_road") {
                 TruckRoadScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("truck_congestion") {
                 TruckCongestionScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("truck_history") {
                 TruckHistoryScreen(
                     navController = navController,
@@ -251,7 +246,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             // ==================== 私家车主模块 ====================
             composable("car_home") {
                 CarHomeScreen(
@@ -259,62 +254,62 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             composable("car_bind") {
                 CarBindScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("car_route") {
                 CarRouteScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("car_road") {
                 CarRoadScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("car_congestion") {
                 CarCongestionScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("car_history") {
                 CarHistoryScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("my_trips") {
                 MyTripsScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             // ==================== 公共模块 ====================
             composable("navigation_map") {
-                NavigationMapScreen(
+                NavigationMapScreenNew(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable(
                 route = "ai_result/{query}",
                 arguments = listOf(
-                    navArgument("query") { 
-                        type = NavType.StringType 
+                    navArgument("query") {
+                        type = NavType.StringType
                         defaultValue = ""
                     }
                 )
@@ -326,21 +321,21 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             composable("user_profile") {
                 UserProfileScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("settings") {
                 SettingsScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             // ==================== AI对话页面 ====================
             composable("ai_chat") {
                 AiChatScreen(

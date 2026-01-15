@@ -7,6 +7,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +25,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -31,7 +34,16 @@ import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.AIState
 import com.example.smartlogistics.viewmodel.MainViewModel
-import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.*
+import com.amap.api.services.core.AMapException
+import com.amap.api.services.core.LatLonPoint
+import com.amap.api.services.core.PoiItem
+import com.amap.api.services.poisearch.PoiResult
+import com.amap.api.services.poisearch.PoiSearch
+import com.amap.api.services.route.*
+import android.graphics.Color as AndroidColor
 
 // ==================== 地图导航页面 (高德地图版) ====================
 @Composable
@@ -40,14 +52,32 @@ fun NavigationMapScreen(
     viewModel: MainViewModel? = null
 ) {
     val context = LocalContext.current
-    val routeResult by viewModel?.routeResult?.collectAsState() ?: remember { mutableStateOf(null) }
-    val trafficData by viewModel?.trafficData?.collectAsState() ?: remember { mutableStateOf(null) }
     
     // 地图状态
     var showTraffic by remember { mutableStateOf(true) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     var destination by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(true) }
+    
+    // ★ 新增：搜索相关状态
+    var isSearching by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
+    var showSearchResults by remember { mutableStateOf(false) }
+    var selectedPoi by remember { mutableStateOf<PoiItem?>(null) }
+    
+    // ★ 新增：路线相关状态
+    var isLoadingRoute by remember { mutableStateOf(false) }
+    var routePath by remember { mutableStateOf<DrivePath?>(null) }
+    var showRouteInfo by remember { mutableStateOf(false) }
+    
+    // ★ 新增：地图引用
+    var aMapRef by remember { mutableStateOf<AMap?>(null) }
+    var routePolyline by remember { mutableStateOf<Polyline?>(null) }
+    var destinationMarker by remember { mutableStateOf<Marker?>(null) }
+    
+    // 模式判断
+    val isProfessional = viewModel?.isProfessionalMode() ?: false
+    val primaryColor = if (isProfessional) TruckOrange else CarGreen
     
     // 权限请求
     var hasLocationPermission by remember {
@@ -78,23 +108,6 @@ fun NavigationMapScreen(
                 )
             )
         }
-        viewModel?.fetchTrafficData()
-    }
-    
-    // 示例POI标记点
-    val sampleMarkers = remember {
-        listOf(
-            MarkerData(
-                position = LatLng(39.908823, 116.397470),
-                title = "天安门广场",
-                snippet = "北京市中心"
-            ),
-            MarkerData(
-                position = LatLng(39.915119, 116.403963),
-                title = "故宫博物院",
-                snippet = "世界文化遗产"
-            )
-        )
     }
     
     Box(modifier = Modifier.fillMaxSize()) {
@@ -103,9 +116,9 @@ fun NavigationMapScreen(
             modifier = Modifier.fillMaxSize(),
             showMyLocation = hasLocationPermission,
             showTraffic = showTraffic,
-            markers = sampleMarkers,
+            markers = emptyList(),
             onMapReady = { aMap ->
-                // 地图准备就绪
+                aMapRef = aMap
             },
             onLocationChanged = { location ->
                 currentLocation = LatLng(location.latitude, location.longitude)
@@ -172,7 +185,7 @@ fun NavigationMapScreen(
                             Box(
                                 modifier = Modifier
                                     .size(12.dp)
-                                    .background(CarGreen, CircleShape)
+                                    .background(primaryColor, CircleShape)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
@@ -184,7 +197,7 @@ fun NavigationMapScreen(
                             Icon(
                                 imageVector = Icons.Rounded.MyLocation,
                                 contentDescription = null,
-                                tint = if (currentLocation != null) CarGreen else TextTertiary,
+                                tint = if (currentLocation != null) primaryColor else TextTertiary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -201,18 +214,37 @@ fun NavigationMapScreen(
                         // 终点输入
                         OutlinedTextField(
                             value = destination,
-                            onValueChange = { destination = it },
+                            onValueChange = { 
+                                destination = it
+                                // 清除之前的选择
+                                if (selectedPoi != null) {
+                                    selectedPoi = null
+                                    showRouteInfo = false
+                                    routePath = null
+                                    routePolyline?.remove()
+                                    destinationMarker?.remove()
+                                }
+                            },
                             placeholder = { Text("输入目的地...", color = TextTertiary) },
                             leadingIcon = {
                                 Box(
                                     modifier = Modifier
                                         .size(12.dp)
-                                        .background(ErrorRed, CircleShape)
+                                        .background(Color(0xFFEA4335), CircleShape)
                                 )
                             },
                             trailingIcon = {
                                 if (destination.isNotBlank()) {
-                                    IconButton(onClick = { destination = "" }) {
+                                    IconButton(onClick = { 
+                                        destination = ""
+                                        searchResults = emptyList()
+                                        showSearchResults = false
+                                        selectedPoi = null
+                                        showRouteInfo = false
+                                        routePath = null
+                                        routePolyline?.remove()
+                                        destinationMarker?.remove()
+                                    }) {
                                         Icon(
                                             imageVector = Icons.Default.Clear,
                                             contentDescription = "清除",
@@ -224,7 +256,7 @@ fun NavigationMapScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = BrandBlue,
+                                focusedBorderColor = primaryColor,
                                 unfocusedBorderColor = BorderLight,
                                 unfocusedContainerColor = BackgroundSecondary,
                                 focusedContainerColor = Color.White
@@ -232,25 +264,221 @@ fun NavigationMapScreen(
                             singleLine = true
                         )
                         
-                        // 搜索按钮
-                        if (destination.isNotBlank()) {
+                        // ★ 搜索按钮 - 真正的POI搜索
+                        if (destination.isNotBlank() && selectedPoi == null) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
-                                    // TODO: 调用路线规划API
-                                    Toast.makeText(context, "正在规划路线到: $destination", Toast.LENGTH_SHORT).show()
+                                    isSearching = true
+                                    val query = PoiSearch.Query(destination, "", "")
+                                    query.pageSize = 20
+                                    query.pageNum = 0
+                                    
+                                    val poiSearch = PoiSearch(context, query)
+                                    poiSearch.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
+                                        override fun onPoiSearched(result: PoiResult?, code: Int) {
+                                            isSearching = false
+                                            if (code == AMapException.CODE_AMAP_SUCCESS && result?.pois != null) {
+                                                searchResults = result.pois
+                                                showSearchResults = result.pois.isNotEmpty()
+                                                if (result.pois.isEmpty()) {
+                                                    Toast.makeText(context, "未找到相关地点", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } else {
+                                                Toast.makeText(context, "搜索失败", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        override fun onPoiItemSearched(item: PoiItem?, code: Int) {}
+                                    })
+                                    poiSearch.searchPOIAsyn()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                enabled = !isSearching
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Navigation,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                if (isSearching) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("开始导航")
+                                Text(if (isSearching) "搜索中..." else "搜索")
+                            }
+                        }
+                        
+                        // ★ 规划路线按钮
+                        if (selectedPoi != null && currentLocation != null && !showRouteInfo) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    isLoadingRoute = true
+                                    
+                                    val routeSearch = RouteSearch(context)
+                                    val fromPoint = LatLonPoint(currentLocation!!.latitude, currentLocation!!.longitude)
+                                    val toPoint = selectedPoi!!.latLonPoint
+                                    val fromAndTo = RouteSearch.FromAndTo(fromPoint, toPoint)
+                                    val query = RouteSearch.DriveRouteQuery(fromAndTo, RouteSearch.DRIVING_SINGLE_DEFAULT, null, null, "")
+                                    
+                                    routeSearch.setRouteSearchListener(object : RouteSearch.OnRouteSearchListener {
+                                        override fun onDriveRouteSearched(result: DriveRouteResult?, code: Int) {
+                                            isLoadingRoute = false
+                                            if (code == AMapException.CODE_AMAP_SUCCESS && result?.paths != null && result.paths.isNotEmpty()) {
+                                                routePath = result.paths[0]
+                                                showRouteInfo = true
+                                                
+                                                // 在地图上绘制路线
+                                                aMapRef?.let { map ->
+                                                    routePolyline?.remove()
+                                                    
+                                                    val points = mutableListOf<LatLng>()
+                                                    result.paths[0].steps.forEach { step ->
+                                                        step.polyline.forEach { point ->
+                                                            points.add(LatLng(point.latitude, point.longitude))
+                                                        }
+                                                    }
+                                                    
+                                                    val routeColor = if (isProfessional) 
+                                                        AndroidColor.parseColor("#FF6D00") 
+                                                    else 
+                                                        AndroidColor.parseColor("#4285F4")
+                                                    
+                                                    routePolyline = map.addPolyline(
+                                                        PolylineOptions()
+                                                            .addAll(points)
+                                                            .width(18f)
+                                                            .color(routeColor)
+                                                            .geodesic(true)
+                                                    )
+                                                    
+                                                    if (points.size >= 2) {
+                                                        val builder = LatLngBounds.Builder()
+                                                        points.forEach { builder.include(it) }
+                                                        map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
+                                                    }
+                                                }
+                                            } else {
+                                                Toast.makeText(context, "路线规划失败", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        override fun onBusRouteSearched(result: BusRouteResult?, code: Int) {}
+                                        override fun onWalkRouteSearched(result: WalkRouteResult?, code: Int) {}
+                                        override fun onRideRouteSearched(result: RideRouteResult?, code: Int) {}
+                                    })
+                                    routeSearch.calculateDriveRouteAsyn(query)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                enabled = !isLoadingRoute
+                            ) {
+                                if (isLoadingRoute) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Route,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (isLoadingRoute) "规划中..." else "规划路线")
+                            }
+                        }
+                    }
+                }
+                
+                // ★ 搜索结果列表
+                AnimatedVisibility(
+                    visible = showSearchResults && searchResults.isNotEmpty(),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .heightIn(max = 300.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        LazyColumn {
+                            items(searchResults) { poi ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedPoi = poi
+                                            destination = poi.title
+                                            showSearchResults = false
+                                            
+                                            aMapRef?.let { map ->
+                                                destinationMarker?.remove()
+                                                destinationMarker = map.addMarker(
+                                                    MarkerOptions()
+                                                        .position(LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude))
+                                                        .title(poi.title)
+                                                        .snippet(poi.snippet)
+                                                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                                                )
+                                                map.animateCamera(
+                                                    CameraUpdateFactory.newLatLngZoom(
+                                                        LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude), 15f
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(primaryColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.LocationOn,
+                                            contentDescription = null,
+                                            tint = primaryColor,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = poi.title ?: "",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = poi.snippet ?: poi.cityName ?: "",
+                                            fontSize = 13.sp,
+                                            color = TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                if (poi != searchResults.last()) {
+                                    HorizontalDivider(color = DividerColor)
+                                }
                             }
                         }
                     }
@@ -283,7 +511,7 @@ fun NavigationMapScreen(
             FloatingActionButton(
                 onClick = { showTraffic = !showTraffic },
                 modifier = Modifier.size(48.dp),
-                containerColor = if (showTraffic) BrandBlue else Color.White,
+                containerColor = if (showTraffic) primaryColor else Color.White,
                 contentColor = if (showTraffic) Color.White else TextPrimary
             ) {
                 Icon(Icons.Rounded.Traffic, contentDescription = "路况")
@@ -314,11 +542,14 @@ fun NavigationMapScreen(
                             )
                         )
                     } else {
-                        Toast.makeText(context, "正在定位...", Toast.LENGTH_SHORT).show()
+                        currentLocation?.let { loc ->
+                            aMapRef?.animateCamera(CameraUpdateFactory.newLatLngZoom(loc, 17f))
+                        }
+                        Toast.makeText(context, "已定位到当前位置", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.size(56.dp),
-                containerColor = BrandBlue,
+                containerColor = primaryColor,
                 contentColor = Color.White
             ) {
                 Icon(
@@ -329,80 +560,193 @@ fun NavigationMapScreen(
             }
         }
         
-        // ==================== 底部路况信息 ====================
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .padding(16.dp)
-                .navigationBarsPadding(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        // ==================== 底部路线信息卡 ★ ====================
+        AnimatedVisibility(
+            visible = showRouteInfo && routePath != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            routePath?.let { path ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .navigationBarsPadding(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    Text(
-                        text = "实时路况",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = if (showTraffic) "已开启" else "已关闭",
-                        fontSize = 12.sp,
-                        color = if (showTraffic) CarGreen else TextTertiary
-                    )
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "路线方案",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            IconButton(
+                                onClick = {
+                                    showRouteInfo = false
+                                    routePath = null
+                                    routePolyline?.remove()
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, "关闭", tint = TextSecondary)
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        // 路线信息
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val distance = path.distance.toInt()
+                                Text(
+                                    text = if (distance >= 1000) String.format("%.1fkm", distance / 1000.0) else "${distance}m",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryColor
+                                )
+                                Text("距离", fontSize = 12.sp, color = TextSecondary)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val duration = path.duration.toInt()
+                                val hours = duration / 3600
+                                val minutes = (duration % 3600) / 60
+                                Text(
+                                    text = if (hours > 0) "${hours}小时${minutes}分" else "${minutes}分钟",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryColor
+                                )
+                                Text("预计时间", fontSize = 12.sp, color = TextSecondary)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val toll = path.tolls.toInt()
+                                Text(
+                                    text = if (toll > 0) "¥$toll" else "免费",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryColor
+                                )
+                                Text("过路费", fontSize = 12.sp, color = TextSecondary)
+                            }
+                        }
+                        
+                        if (path.totalTrafficlights > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "途经 ${path.totalTrafficlights} 个红绿灯",
+                                fontSize = 12.sp,
+                                color = TextTertiary,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Button(
+                            onClick = { Toast.makeText(context, "开始导航", Toast.LENGTH_SHORT).show() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                        ) {
+                            Icon(Icons.Rounded.Navigation, null, Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("开始导航", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // 路况图例
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    TrafficLegendItem(color = CongestionFree, label = "畅通")
-                    TrafficLegendItem(color = CongestionLight, label = "缓行")
-                    TrafficLegendItem(color = CongestionModerate, label = "拥堵")
-                    TrafficLegendItem(color = CongestionSevere, label = "严重")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // 快捷操作
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    QuickActionButton(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.NearMe,
-                        text = "附近",
-                        onClick = { }
-                    )
-                    QuickActionButton(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.LocalParking,
-                        text = "停车场",
-                        onClick = { }
-                    )
-                    QuickActionButton(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.LocalGasStation,
-                        text = "加油站",
-                        onClick = { }
-                    )
-                    QuickActionButton(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.Restaurant,
-                        text = "美食",
-                        onClick = { }
-                    )
+            }
+        }
+        
+        // ==================== 底部路况信息（没有路线时显示） ====================
+        if (!showRouteInfo) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+                    .navigationBarsPadding(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "实时路况",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = if (showTraffic) "已开启" else "已关闭",
+                            fontSize = 12.sp,
+                            color = if (showTraffic) primaryColor else TextTertiary
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 路况图例
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        TrafficLegendItem(color = CongestionFree, label = "畅通")
+                        TrafficLegendItem(color = CongestionLight, label = "缓行")
+                        TrafficLegendItem(color = CongestionModerate, label = "拥堵")
+                        TrafficLegendItem(color = CongestionSevere, label = "严重")
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 快捷操作
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        QuickActionButton(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Rounded.NearMe,
+                            text = "附近",
+                            onClick = { }
+                        )
+                        QuickActionButton(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Rounded.LocalParking,
+                            text = "停车场",
+                            onClick = { }
+                        )
+                        QuickActionButton(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Rounded.LocalGasStation,
+                            text = "加油站",
+                            onClick = { }
+                        )
+                        QuickActionButton(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Rounded.Restaurant,
+                            text = "美食",
+                            onClick = { }
+                        )
+                    }
                 }
             }
         }

@@ -8,7 +8,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,7 +22,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +63,7 @@ fun AiChatScreen(
     val speechHelper = remember { XunfeiSpeechHelper() }
     val speechState by speechHelper.state.collectAsState()
     val volumeLevel by speechHelper.volumeLevel.collectAsState()
+    val partialText by speechHelper.partialText.collectAsState()
     var showVoiceDialog by remember { mutableStateOf(false) }
 
     // 权限请求
@@ -80,6 +79,7 @@ fun AiChatScreen(
     ) { isGranted ->
         hasRecordPermission = isGranted
         if (isGranted) {
+            // 获得权限后自动开始录音
             showVoiceDialog = true
             speechHelper.startListening()
         } else {
@@ -92,7 +92,9 @@ fun AiChatScreen(
         when (speechState) {
             is XunfeiSpeechHelper.SpeechState.Result -> {
                 val text = (speechState as XunfeiSpeechHelper.SpeechState.Result).text
-                inputText = text
+                if (text.isNotBlank()) {
+                    inputText = text
+                }
                 showVoiceDialog = false
                 speechHelper.resetState()
             }
@@ -282,15 +284,17 @@ fun AiChatScreen(
             // 语音识别弹窗
             if (showVoiceDialog) {
                 VoiceRecordingDialog(
-                    speechState = speechState,
+                    partialText = partialText,
                     volumeLevel = volumeLevel,
+                    isListening = speechState is XunfeiSpeechHelper.SpeechState.Listening,
+                    isProcessing = speechState is XunfeiSpeechHelper.SpeechState.Processing,
                     primaryColor = primaryColor,
-                    onDismiss = {
+                    onFinish = {
+                        speechHelper.stopListening()
+                    },
+                    onCancel = {
                         speechHelper.cancel()
                         showVoiceDialog = false
-                    },
-                    onStop = {
-                        speechHelper.stopListening()
                     }
                 )
             }
@@ -298,89 +302,50 @@ fun AiChatScreen(
     }
 }
 
-// ==================== 语音录制弹窗 ====================
+// ==================== 语音识别弹窗（优化动画版） ====================
 @Composable
 private fun VoiceRecordingDialog(
-    speechState: XunfeiSpeechHelper.SpeechState,
+    partialText: String,
     volumeLevel: Float,
+    isListening: Boolean,
+    isProcessing: Boolean,
     primaryColor: Color,
-    onDismiss: () -> Unit,
-    onStop: () -> Unit
+    onFinish: () -> Unit,
+    onCancel: () -> Unit
 ) {
-    // 呼吸动画
-    val infiniteTransition = rememberInfiniteTransition(label = "breathing")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-
-    // 音量响应的缩放
-    val volumeScale = 1f + volumeLevel * 0.5f
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f)),
+            .background(Color.Black.copy(alpha = 0.5f)),
         contentAlignment = Alignment.Center
     ) {
-        // 点击背景关闭
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { onDismiss() }
-        )
-
         Card(
-            modifier = Modifier.width(280.dp),
-            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .width(300.dp)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
-                modifier = Modifier.padding(32.dp),
+                modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 状态文字
-                Text(
-                    text = when (speechState) {
-                        is XunfeiSpeechHelper.SpeechState.Listening -> "正在聆听..."
-                        is XunfeiSpeechHelper.SpeechState.Processing -> "识别中..."
-                        else -> "请说话"
-                    },
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = TextPrimary
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // 麦克风动画
+                // 麦克风图标区域（简化动画）
                 Box(
+                    modifier = Modifier.size(100.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // 外圈波纹
-                    if (speechState is XunfeiSpeechHelper.SpeechState.Listening) {
-                        Box(
-                            modifier = Modifier
-                                .size(120.dp)
-                                .scale(scale * volumeScale)
-                                .background(
-                                    primaryColor.copy(alpha = 0.1f),
-                                    CircleShape
-                                )
+                    // 外圈 - 根据音量变化大小（简化版）
+                    if (isListening) {
+                        val animatedSize by animateFloatAsState(
+                            targetValue = 80f + volumeLevel * 20f,
+                            animationSpec = tween(100),
+                            label = "size"
                         )
                         Box(
                             modifier = Modifier
-                                .size(100.dp)
-                                .scale(volumeScale)
+                                .size(animatedSize.dp)
                                 .background(
                                     primaryColor.copy(alpha = 0.2f),
                                     CircleShape
@@ -391,18 +356,13 @@ private fun VoiceRecordingDialog(
                     // 麦克风图标
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(primaryColor, primaryColor.copy(alpha = 0.8f))
-                                ),
-                                shape = CircleShape
-                            ),
+                            .size(64.dp)
+                            .background(primaryColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (speechState is XunfeiSpeechHelper.SpeechState.Processing) {
+                        if (isProcessing) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(28.dp),
                                 color = Color.White,
                                 strokeWidth = 3.dp
                             )
@@ -411,58 +371,108 @@ private fun VoiceRecordingDialog(
                                 imageVector = Icons.Rounded.Mic,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(32.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // 音量指示条
-                if (speechState is XunfeiSpeechHelper.SpeechState.Listening) {
+                // 音量指示条（简化版）
+                if (isListening) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(24.dp)
                     ) {
-                        repeat(7) { index ->
-                            val barHeight = when {
-                                index == 3 -> 24.dp * (0.5f + volumeLevel * 0.5f)
-                                index == 2 || index == 4 -> 20.dp * (0.4f + volumeLevel * 0.6f)
-                                index == 1 || index == 5 -> 16.dp * (0.3f + volumeLevel * 0.7f)
-                                else -> 12.dp * (0.2f + volumeLevel * 0.8f)
+                        repeat(5) { index ->
+                            val baseHeight = when (index) {
+                                2 -> 20f
+                                1, 3 -> 14f
+                                else -> 8f
                             }
+                            val height = baseHeight * (0.4f + volumeLevel * 0.6f)
+                            
                             Box(
                                 modifier = Modifier
-                                    .width(6.dp)
-                                    .height(barHeight)
+                                    .width(4.dp)
+                                    .height(height.dp)
                                     .background(
                                         primaryColor.copy(alpha = 0.6f + volumeLevel * 0.4f),
-                                        RoundedCornerShape(3.dp)
+                                        RoundedCornerShape(2.dp)
                                     )
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // 提示文字
-                Text(
-                    text = when (speechState) {
-                        is XunfeiSpeechHelper.SpeechState.Listening -> "松开或点击完成"
-                        is XunfeiSpeechHelper.SpeechState.Processing -> "正在识别您的语音"
-                        else -> "点击麦克风开始"
-                    },
-                    fontSize = 14.sp,
-                    color = TextSecondary
-                )
+                // 实时识别文字显示区域
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 50.dp, max = 100.dp)
+                        .background(
+                            Color(0xFFF5F5F5),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (partialText.isNotBlank()) {
+                        Text(
+                            text = partialText,
+                            fontSize = 16.sp,
+                            color = TextPrimary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 22.sp
+                        )
+                    } else {
+                        Text(
+                            text = when {
+                                isProcessing -> "识别中..."
+                                isListening -> "请说话..."
+                                else -> "准备中..."
+                            },
+                            fontSize = 14.sp,
+                            color = TextTertiary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 取消按钮
-                TextButton(onClick = onDismiss) {
-                    Text("取消", color = TextSecondary)
+                // 按钮区域
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // 取消按钮
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = TextSecondary
+                        )
+                    ) {
+                        Text("取消", fontSize = 14.sp)
+                    }
+
+                    // 完成按钮
+                    Button(
+                        onClick = onFinish,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = primaryColor
+                        ),
+                        enabled = isListening
+                    ) {
+                        Text("完成", fontSize = 14.sp)
+                    }
                 }
             }
         }
@@ -725,15 +735,14 @@ private fun TypingIndicator() {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 repeat(3) { index ->
-                    val infiniteTransition = rememberInfiniteTransition(label = "dot$index")
-                    val alpha by infiniteTransition.animateFloat(
+                    val alpha by rememberInfiniteTransition(label = "typing").animateFloat(
                         initialValue = 0.3f,
                         targetValue = 1f,
                         animationSpec = infiniteRepeatable(
-                            animation = tween(600, delayMillis = index * 200),
+                            animation = tween(500, delayMillis = index * 150),
                             repeatMode = RepeatMode.Reverse
                         ),
-                        label = "alpha"
+                        label = "alpha$index"
                     )
                     Box(
                         modifier = Modifier
@@ -794,7 +803,7 @@ private fun InputSection(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // 语音按钮
+            // 语音按钮 - 点击触发
             Box(
                 modifier = Modifier
                     .size(48.dp)

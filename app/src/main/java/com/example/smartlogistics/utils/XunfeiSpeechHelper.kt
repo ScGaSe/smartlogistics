@@ -22,7 +22,7 @@ class XunfeiSpeechHelper {
     companion object {
         private const val TAG = "XunfeiSpeech"
 
-        // 讯飞应用配置 - 替换为你的APPID
+        // 讯飞应用配置
         private const val APP_ID = "a0ede71d"
         private const val API_KEY = "ae2e5348692344a0bc4834e44ec338ff"
         private const val API_SECRET = "ZjM1YWM2OTA5YTRmYTEzMGY5ZWRjNDJk"
@@ -67,6 +67,10 @@ class XunfeiSpeechHelper {
     private val _volumeLevel = MutableStateFlow(0f)
     val volumeLevel: StateFlow<Float> = _volumeLevel
 
+    // ★ 新增：实时识别文字（用于显示在弹窗中）
+    private val _partialText = MutableStateFlow("")
+    val partialText: StateFlow<String> = _partialText
+
     private var mAsr: ASR? = null
     private var audioRecorder: AudioRecord? = null
     private var recordingThread: Thread? = null
@@ -92,16 +96,19 @@ class XunfeiSpeechHelper {
                         // 第一块结果
                         resultCache.clear()
                         resultCache.append(text)
+                        _partialText.value = text  // ★ 更新实时文字
                     }
                     1 -> {
                         // 中间结果
                         resultCache.clear()
                         resultCache.append(text)
+                        _partialText.value = text  // ★ 更新实时文字
                     }
                     2 -> {
                         // 最终结果
                         resultCache.clear()
                         resultCache.append(text)
+                        _partialText.value = text  // ★ 更新实时文字
                         _state.value = SpeechState.Result(resultCache.toString())
                         stopListening()
                     }
@@ -141,6 +148,10 @@ class XunfeiSpeechHelper {
             return
         }
 
+        // ★ 清空之前的文字
+        _partialText.value = ""
+        resultCache.clear()
+
         try {
             // 初始化ASR
             if (mAsr == null) {
@@ -167,7 +178,6 @@ class XunfeiSpeechHelper {
             // 启动录音
             startRecording()
             _state.value = SpeechState.Listening
-            resultCache.clear()
 
         } catch (e: Exception) {
             Log.e(TAG, "启动语音识别失败: ${e.message}")
@@ -199,6 +209,7 @@ class XunfeiSpeechHelper {
             stopRecording()
             mAsr?.stop(true)
             _state.value = SpeechState.Idle
+            _partialText.value = ""  // ★ 清空实时文字
         } catch (e: Exception) {
             Log.e(TAG, "取消识别失败: ${e.message}")
         }
@@ -209,6 +220,7 @@ class XunfeiSpeechHelper {
      */
     fun resetState() {
         _state.value = SpeechState.Idle
+        _partialText.value = ""  // ★ 清空实时文字
     }
 
     /**
