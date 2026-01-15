@@ -9,29 +9,26 @@ import com.amap.api.services.core.ServiceSettings
  * 应用级初始化
  */
 class SmartLogisticsApp : Application() {
-    
+
     override fun onCreate() {
         super.onCreate()
-        
+
         // 初始化网络客户端
         RetrofitClient.init(
             context = this,
-            useMock = BuildConfig.DEBUG // Debug模式使用Mock
+            useMock = BuildConfig.DEBUG
         )
 
         // 定位服务隐私合规
         AMapLocationClient.updatePrivacyShow(this, true, true)
         AMapLocationClient.updatePrivacyAgree(this, true)
 
-        // 搜索服务隐私合规 - 添加这两行！
+        // 搜索服务隐私合规
         ServiceSettings.updatePrivacyShow(this, true, true)
         ServiceSettings.updatePrivacyAgree(this, true)
-        
-        // TODO: 初始化其他SDK
-        // - 高德/百度地图SDK
-        // - ML Kit
-        // - 崩溃收集
-        // - 推送服务
+
+        // key
+       // ServiceSettings.getInstance().setApiKey("25c3f3c88fd0f3a407d7261c1f09301d")
     }
 }
 

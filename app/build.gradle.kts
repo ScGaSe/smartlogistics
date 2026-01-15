@@ -108,7 +108,6 @@ dependencies {
     // ==================== 高德地图 SDK（合包） ====================
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
 
-
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
