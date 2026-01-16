@@ -1,8 +1,14 @@
 package com.example.smartlogistics.ui.screens
 
+import CongestionDetailCard
+import RoadCongestionList
+import TTITrendChart
+import TimeRangeSelector
 import android.Manifest
 import android.R.attr.text
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,10 +41,18 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.utils.HazmatRecognitionHelper
+import com.example.smartlogistics.utils.HazmatRecognitionResult
+import com.example.smartlogistics.utils.TFLiteHelper
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.ReportState
+import generateMockCongestionData
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ==================== 货运司机主页 ====================
 @Composable
@@ -67,7 +81,7 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             searchHint = "搜索仓库、货站、限行路段...",
             primaryColor = TruckOrange,
             gradientBrush = Brush.linearGradient(colors = listOf(TruckOrange, TruckOrangeDark)),
-            onSearchClick = { navController.navigate("navigation_map_new") },
+            onSearchClick = { navController.navigate("navigation_map") },
             onAiClick = { navController.navigate("ai_chat") }
         )
         
@@ -172,6 +186,9 @@ private fun TruckTrafficLegendItem(color: Color, label: String) {
 // ==================== 车辆绑定页面 ====================
 @Composable
 fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+
+    // ========== 基础状态 ==========
     var plateNumber by remember { mutableStateOf("") }
     var vehicleType by remember { mutableStateOf("truck") }
     var heightM by remember { mutableStateOf("") }
@@ -180,26 +197,152 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     val vehicleState by viewModel?.vehicleState?.collectAsState() ?: remember { mutableStateOf(VehicleState.Idle) }
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val isLoading = vehicleState is VehicleState.Loading
-    
-    LaunchedEffect(vehicleState) { if (vehicleState is VehicleState.BindSuccess) { plateNumber = ""; heightM = ""; weightT = ""; viewModel?.resetVehicleState() } }
-    
-    DetailScreenTemplate(navController = navController, title = "车辆绑定", backgroundColor = BackgroundPrimary) {
-        if (vehicles.isNotEmpty()) {
-            Text(text = "已绑定车辆", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+
+    // ========== 车牌识别状态 ==========
+    var isRecognizing by remember { mutableStateOf(false) }
+    var recognitionResult by remember { mutableStateOf<String?>(null) }
+    val tfliteHelper = remember { TFLiteHelper(context) }
+
+    // =====================================================
+    // 关键！！！所有 Launcher 必须在这里声明（DetailScreenTemplate 之前）
+    // =====================================================
+
+    // 1. 图片选择器 Launcher
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            isRecognizing = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val bitmap = tfliteHelper.loadImageFromUri(it)
+                val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
+                withContext(Dispatchers.Main) {
+                    isRecognizing = false
+                    result?.let { plate ->
+                        plateNumber = plate
+                        recognitionResult = "识别成功: $plate"
+                    } ?: run {
+                        recognitionResult = "识别失败，请重试"
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 相机拍照 Launcher
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        bitmap?.let {
+            isRecognizing = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val result = tfliteHelper.recognizePlate(it)
+                withContext(Dispatchers.Main) {
+                    isRecognizing = false
+                    plateNumber = result
+                    recognitionResult = "识别成功: $result"
+                }
+            }
+        }
+    }
+
+    // 3. 相机权限 Launcher
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            cameraLauncher.launch(null)
+        } else {
+            Toast.makeText(context, "需要相机权限才能拍照识别", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // =====================================================
+    // Launcher 声明结束
+    // =====================================================
+
+    // 副作用
+    LaunchedEffect(vehicleState) {
+        if (vehicleState is VehicleState.BindSuccess) {
+            plateNumber = ""
+            heightM = ""
+            weightT = ""
+            recognitionResult = null
+            viewModel?.resetVehicleState()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { tfliteHelper.close() }
+    }
+
+    // =====================================================
+    // UI - DetailScreenTemplate 在这里开始
+    // =====================================================
+    DetailScreenTemplate(
+        navController = navController,
+        title = "车辆绑定",
+        backgroundColor = BackgroundPrimary
+    ) {
+        val validVehicles = vehicles.filter {
+            it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true)
+        }
+
+        // ==================== 已绑定车辆列表 ====================
+        if (validVehicles.isNotEmpty()) {
+            Text(
+                text = "已绑定车辆",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary
+            )
             Spacer(modifier = Modifier.height(12.dp))
-            vehicles.forEach { vehicle ->
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(48.dp).background(TruckOrangeLight, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                            Icon(imageVector = Icons.Rounded.LocalShipping, contentDescription = null, tint = TruckOrange, modifier = Modifier.size(28.dp))
+
+            validVehicles.forEach { vehicle ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(TruckOrangeLight, RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.LocalShipping,
+                                contentDescription = null,
+                                tint = TruckOrange,
+                                modifier = Modifier.size(28.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = vehicle.plateNumber, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text(text = vehicle.vehicleType, fontSize = 14.sp, color = TextSecondary)
+                            Text(
+                                text = vehicle.plateNumber,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = vehicle.vehicleType,
+                                fontSize = 14.sp,
+                                color = TextSecondary
+                            )
                         }
                         IconButton(onClick = { vehicle.vehicleId?.let { viewModel?.unbindVehicle(it) } }) {
-                            Icon(imageVector = Icons.Default.Delete, contentDescription = "删除", tint = ErrorRed)
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "删除",
+                                tint = ErrorRed
+                            )
                         }
                     }
                 }
@@ -207,48 +350,286 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
-        
-        Text(text = "添加货运车辆", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+
+        // ==================== 添加货运车辆 ====================
+        Text(
+            text = "添加货运车辆",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
         Spacer(modifier = Modifier.height(12.dp))
-        
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Card(modifier = Modifier.fillMaxWidth().clickable { }, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TruckOrange.copy(alpha = 0.1f))) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, tint = TruckOrange, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "AI智能识别车牌", fontSize = 15.sp, color = TruckOrange, fontWeight = FontWeight.Medium)
+
+                // ========== AI智能识别车牌区域 ==========
+                Text(
+                    text = "智能识别车牌",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // 拍照识别按钮 - 只调用 launch()，不声明 launcher
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                // 检查权限
+                                if (ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.CAMERA
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    cameraLauncher.launch(null)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = TruckOrange.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CameraAlt,
+                                contentDescription = null,
+                                tint = TruckOrange,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "拍照识别",
+                                fontSize = 15.sp,
+                                color = TruckOrange,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // 相册选择按钮 - 只调用 launch()，不声明 launcher
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                imagePickerLauncher.launch("image/*")
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = TruckOrange.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Photo,
+                                contentDescription = null,
+                                tint = TruckOrange,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "相册选择",
+                                fontSize = 15.sp,
+                                color = TruckOrange,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
+
+                // 识别状态显示
+                if (isRecognizing) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(TruckOrange.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = TruckOrange,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "正在识别车牌...", fontSize = 13.sp, color = TruckOrange)
+                    }
+                }
+
+                // 识别结果显示
+                recognitionResult?.let { result ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(TruckOrange.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = TruckOrange,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = result,
+                            fontSize = 13.sp,
+                            color = TruckOrange,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
-                StyledTextField(value = plateNumber, onValueChange = { plateNumber = it.uppercase() }, label = "车牌号", leadingIcon = Icons.Rounded.Pin)
+
+                // ========== 手动输入区域 ==========
+                Text(
+                    text = "或手动输入",
+                    fontSize = 14.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
                 Spacer(modifier = Modifier.height(16.dp))
+
+                StyledTextField(
+                    value = plateNumber,
+                    onValueChange = { plateNumber = it.uppercase() },
+                    label = "车牌号",
+                    leadingIcon = Icons.Rounded.Pin
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ========== 车辆类型选择 ==========
                 Text(text = "车辆类型", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("truck" to "普通货车", "hazmat" to "危化品车", "refrigerated" to "冷链车").forEach { (type, label) ->
-                        FilterChip(selected = vehicleType == type, onClick = { vehicleType = type }, label = { Text(label, fontSize = 13.sp) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TruckOrange.copy(alpha = 0.2f), selectedLabelColor = TruckOrange))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "truck" to "普通货车",
+                        "hazmat" to "危化品车",
+                        "refrigerated" to "冷链车"
+                    ).forEach { (type, label) ->
+                        FilterChip(
+                            selected = vehicleType == type,
+                            onClick = { vehicleType = type },
+                            label = { Text(label, fontSize = 13.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = TruckOrange.copy(alpha = 0.2f),
+                                selectedLabelColor = TruckOrange
+                            )
+                        )
                     }
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // ========== 车辆参数 ==========
                 Text(text = "车辆参数", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(value = heightM, onValueChange = { heightM = it }, label = { Text("车高(米)") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = TruckOrange, unfocusedBorderColor = BorderLight))
-                    OutlinedTextField(value = weightT, onValueChange = { weightT = it }, label = { Text("载重(吨)") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = TruckOrange, unfocusedBorderColor = BorderLight))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = heightM,
+                        onValueChange = { heightM = it },
+                        label = { Text("车高(米)") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TruckOrange,
+                            unfocusedBorderColor = BorderLight
+                        )
+                    )
+                    OutlinedTextField(
+                        value = weightT,
+                        onValueChange = { weightT = it },
+                        label = { Text("载重(吨)") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TruckOrange,
+                            unfocusedBorderColor = BorderLight
+                        )
+                    )
                 }
+
                 Spacer(modifier = Modifier.height(12.dp))
+
+                // ========== 轴数选择 ==========
                 Text(text = "轴数", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     listOf("2", "3", "4", "5", "6+").forEach { count ->
-                        FilterChip(selected = axleCount == count, onClick = { axleCount = count }, label = { Text("$count 轴") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TruckOrange.copy(alpha = 0.2f), selectedLabelColor = TruckOrange))
+                        FilterChip(
+                            selected = axleCount == count,
+                            onClick = { axleCount = count },
+                            label = { Text("$count 轴") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = TruckOrange.copy(alpha = 0.2f),
+                                selectedLabelColor = TruckOrange
+                            )
+                        )
                     }
                 }
             }
         }
+
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "绑定车辆", onClick = { viewModel?.bindVehicle(plateNumber, vehicleType, heightM.toDoubleOrNull(), weightT.toDoubleOrNull(), axleCount.replace("+", "").toIntOrNull()) }, isLoading = isLoading, enabled = plateNumber.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Add)
+
+        // ========== 绑定按钮 ==========
+        PrimaryButton(
+            text = "绑定车辆",
+            onClick = {
+                viewModel?.bindVehicle(
+                    plateNumber,
+                    vehicleType,
+                    heightM.toDoubleOrNull(),
+                    weightT.toDoubleOrNull(),
+                    axleCount.replace("+", "").toIntOrNull()
+                )
+            },
+            isLoading = isLoading,
+            enabled = plateNumber.isNotBlank(),
+            backgroundColor = TruckOrange,
+            icon = Icons.Rounded.Add
+        )
     }
 }
 
@@ -277,7 +658,7 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
         Spacer(modifier = Modifier.height(20.dp))
         TipCard(text = "系统将自动避开限高、限重路段，并考虑危化品车辆通行限制。", icon = Icons.Rounded.Info, backgroundColor = TruckOrangeLight, iconColor = TruckOrange)
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map_new") }, enabled = destination.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Navigation)
+        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map") }, enabled = destination.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Navigation)
     }
 }
 
@@ -309,39 +690,384 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
 // ==================== 拥堵预测页面 ====================
 @Composable
 fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "拥堵预测", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth().height(280.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    // 数据状态
+    val congestionData = remember { generateMockCongestionData() }
+    var selectedTimeRange by remember { mutableStateOf("今天") }
+    var selectedDataIndex by remember { mutableStateOf(10) } // 默认选中16:00
+
+    // 模拟货运主干道数据
+    val truckRoads = remember {
+        listOf(
+            Triple("北门闸口通道", "2.5km", CongestionLevel.MODERATE),
+            Triple("3号仓库入口", "1.2km", CongestionLevel.LIGHT),
+            Triple("危化品专用道", "3.8km", CongestionLevel.FREE),
+            Triple("集装箱堆场通道", "1.5km", CongestionLevel.SEVERE),
+            Triple("南门出口通道", "2.0km", CongestionLevel.LIGHT)
+        )
+    }
+
+    DetailScreenTemplate(
+        navController = navController,
+        title = "拥堵预测",
+        backgroundColor = BackgroundPrimary
+    ) {
+        // 时间选择器
+        TimeRangeSelector(
+            selectedRange = selectedTimeRange,
+            onRangeSelected = { selectedTimeRange = it },
+            primaryColor = TruckOrange
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 图表卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(text = "货运主干道拥堵预测", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Box(modifier = Modifier.fillMaxWidth().height(160.dp).background(BackgroundSecondary, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                    Text(text = "拥堵趋势图\n(TTI指数)", color = TextSecondary, textAlign = TextAlign.Center)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "货运主干道拥堵趋势",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+
+                    // 图例
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CongestionLevel.values().take(3).forEach { level ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(level.color, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = level.label,
+                                    fontSize = 10.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // TTI趋势图
+                TTITrendChart(
+                    data = congestionData,
+                    selectedIndex = selectedDataIndex,
+                    onPointSelected = { selectedDataIndex = it },
+                    primaryColor = TruckOrange
+                )
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 选中时间点详情
+        CongestionDetailCard(
+            dataPoint = congestionData[selectedDataIndex],
+            primaryColor = TruckOrange
+        )
+
         Spacer(modifier = Modifier.height(20.dp))
-        TipCard(text = "建议避开16:00-17:30时段通过北门闸口。", icon = Icons.Rounded.Lightbulb, backgroundColor = TruckOrangeLight, iconColor = TruckOrange)
+
+        // 智能建议
+        val selectedData = congestionData[selectedDataIndex]
+        val suggestion = when (selectedData.level) {
+            CongestionLevel.FREE -> "当前时段路况畅通，建议此时出行。"
+            CongestionLevel.LIGHT -> "轻微缓行，预计延误5-10分钟。"
+            CongestionLevel.MODERATE -> "建议避开此时段，或选择备用路线。"
+            CongestionLevel.SEVERE -> "严重拥堵！建议推迟1-2小时出发。"
+        }
+
+        TipCard(
+            text = suggestion,
+            icon = Icons.Rounded.Lightbulb,
+            backgroundColor = TruckOrangeLight,
+            iconColor = TruckOrange
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 各路段拥堵状态
+        Text(
+            text = "货运通道实时状态",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        RoadCongestionList(
+            roads = truckRoads,
+            primaryColor = TruckOrange
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 开始导航按钮
+        PrimaryButton(
+            text = "规划最优路线",
+            onClick = { navController.navigate("navigation_map") },
+            backgroundColor = TruckOrange,
+            icon = Icons.Rounded.Navigation
+        )
     }
 }
 
 // ==================== 历史数据页面 ====================
 @Composable
 fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "历史数据", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = TruckOrange)) {
+    // 模拟历史数据
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("本周", "本月", "全部")
+
+    val historyRecords = remember {
+        listOf(
+            HistoryRecord("2024-12-15", "3号仓库 → 北门出口", "普通货物", 15.5, "32分钟", "已完成"),
+            HistoryRecord("2024-12-14", "危化品区 → 南门闸口", "危险品", 8.2, "28分钟", "已完成"),
+            HistoryRecord("2024-12-14", "集装箱堆场 → 2号仓库", "集装箱", 12.0, "45分钟", "已完成"),
+            HistoryRecord("2024-12-13", "冷链区 → 北门出口", "冷链货物", 18.3, "38分钟", "已完成"),
+            HistoryRecord("2024-12-12", "1号仓库 → 3号仓库", "普通货物", 5.5, "15分钟", "已完成"),
+            HistoryRecord("2024-12-11", "南门入口 → 危化品区", "危险品", 10.8, "35分钟", "已完成")
+        )
+    }
+
+    DetailScreenTemplate(
+        navController = navController,
+        title = "历史数据",
+        backgroundColor = BackgroundPrimary
+    ) {
+        // 统计卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = TruckOrange)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(text = "本月运输统计", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
+                Text(
+                    text = "本月运输统计",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 14.sp
+                )
+
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "156", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "运输单数", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "2,486km", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "总里程", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    StatItem(value = "156", label = "运输单数", color = Color.White)
+                    StatItem(value = "2,486", label = "总里程(km)", color = Color.White)
+                    StatItem(value = "98%", label = "准时率", color = Color.White)
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    StatItem(value = "45", label = "普通货物", color = Color.White)
+                    StatItem(value = "28", label = "冷链货物", color = Color.White)
+                    StatItem(value = "12", label = "危险品", color = Color.White)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Tab 选择器
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                FilterChip(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    label = {
+                        Text(
+                            text = tab,
+                            fontWeight = if (selectedTab == index) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = TruckOrange.copy(alpha = 0.15f),
+                        selectedLabelColor = TruckOrange
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 历史记录列表
+        Text(
+            text = "运输记录",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        historyRecords.forEach { record ->
+            HistoryRecordCard(
+                record = record,
+                primaryColor = TruckOrange,
+                isHazardous = record.cargoType == "危险品"
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 加载更多
+        TextButton(
+            onClick = { /* TODO: 加载更多 */ },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "加载更多记录",
+                color = TruckOrange
+            )
+        }
+    }
+}
+
+// ==================== 历史记录数据模型 ====================
+data class HistoryRecord(
+    val date: String,
+    val route: String,
+    val cargoType: String,
+    val distance: Double,
+    val duration: String,
+    val status: String
+)
+
+// ==================== 统计项组件 ====================
+@Composable
+private fun StatItem(
+    value: String,
+    label: String,
+    color: Color
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            color = color,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = label,
+            color = color.copy(alpha = 0.8f),
+            fontSize = 12.sp
+        )
+    }
+}
+
+// ==================== 历史记录卡片 ====================
+@Composable
+private fun HistoryRecordCard(
+    record: HistoryRecord,
+    primaryColor: Color,
+    isHazardous: Boolean = false
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 图标
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        if (isHazardous) ErrorRedLight else primaryColor.copy(alpha = 0.1f),
+                        RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isHazardous) Icons.Rounded.Warning else Icons.Rounded.LocalShipping,
+                    contentDescription = null,
+                    tint = if (isHazardous) ErrorRed else primaryColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // 信息
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = record.route,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = record.date,
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(4.dp)
+                            .background(TextTertiary, CircleShape)
+                    )
+
+                    Text(
+                        text = record.cargoType,
+                        fontSize = 12.sp,
+                        color = if (isHazardous) ErrorRed else TextSecondary
+                    )
+                }
+            }
+
+            // 距离和时间
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "${record.distance}km",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = primaryColor
+                )
+                Text(
+                    text = record.duration,
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
             }
         }
     }
@@ -437,14 +1163,69 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             else -> {}
         }
     }
+    // ========== 语音识别相关状态结束 ==========
 
-    // 释放资源
+    // ========== 危化品识别相关状态 ==========
+    val hazmatHelper = remember { HazmatRecognitionHelper(context) }
+    var isHazmatRecognizing by remember { mutableStateOf(false) }
+    var hazmatRecognitionResult by remember { mutableStateOf<HazmatRecognitionResult?>(null) }
+
+    // 危化品图片选择器
+    val hazmatImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            isHazmatRecognizing = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val bitmap = hazmatHelper.loadImageFromUri(it)
+                val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
+
+                withContext(Dispatchers.Main) {
+                    isHazmatRecognizing = false
+                    result?.let { res ->
+                        hazmatRecognitionResult = res
+                        res.hazmatClass?.let { hazardClass = it.name }
+                    }
+                }
+            }
+        }
+    }
+
+    // 危化品相机拍照
+    val hazmatCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        bitmap?.let {
+            isHazmatRecognizing = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val result = hazmatHelper.recognizeHazmat(it)
+
+                withContext(Dispatchers.Main) {
+                    isHazmatRecognizing = false
+                    hazmatRecognitionResult = result
+                    result.hazmatClass?.let { hazardClass = it.name }
+                }
+            }
+        }
+    }
+
+    // 危化品相机权限
+    val hazmatCameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            hazmatCameraLauncher.launch(null)
+        }
+    }
+
+    // 在 DisposableEffect 中添加清理
     DisposableEffect(Unit) {
         onDispose {
             speechHelper.destroy()
+            hazmatHelper.close()  // 添加这行
         }
     }
-    // ========== 语音识别相关状态结束 ==========
+    // ========== 危化品识别相关状态结束 ==========
 
     LaunchedEffect(reportState) {
         if (reportState is ReportState.SubmitSuccess) {
@@ -547,9 +1328,186 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                 if (isHazardous) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    TipCard(text = "危化品运输需要特殊审批。", icon = Icons.Rounded.Warning, backgroundColor = ErrorRedLight, iconColor = ErrorRed)
+
+                    TipCard(
+                        text = "危化品运输需要特殊审批，请先识别或填写危化品类别。",
+                        icon = Icons.Rounded.Warning,
+                        backgroundColor = ErrorRedLight,
+                        iconColor = ErrorRed
+                    )
+
                     Spacer(modifier = Modifier.height(12.dp))
-                    StyledTextField(value = hazardClass, onValueChange = { hazardClass = it }, label = "危化品类别", leadingIcon = Icons.Rounded.Warning)
+
+                    // ========== 危化品智能识别卡片（简化版，不含 launcher） ==========
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = ErrorRed.copy(alpha = 0.05f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // 标题行
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "智能识别危化品标识",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextPrimary
+                                )
+
+                                Icon(
+                                    imageVector = Icons.Rounded.Warning,
+                                    contentDescription = null,
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 拍照/相册按钮
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // 拍照识别
+                                OutlinedButton(
+                                    onClick = {
+                                        when (PackageManager.PERMISSION_GRANTED) {
+                                            ContextCompat.checkSelfPermission(
+                                                context,
+                                                android.Manifest.permission.CAMERA
+                                            ) -> hazmatCameraLauncher.launch(null)
+                                            else -> hazmatCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, ErrorRed)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CameraAlt,
+                                        contentDescription = null,
+                                        tint = ErrorRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("拍照识别", color = ErrorRed, fontSize = 13.sp)
+                                }
+
+                                // 相册选择
+                                OutlinedButton(
+                                    onClick = { hazmatImagePickerLauncher.launch("image/*") },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, ErrorRed)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Photo,
+                                        contentDescription = null,
+                                        tint = ErrorRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("相册选择", color = ErrorRed, fontSize = 13.sp)
+                                }
+                            }
+
+                            // 识别中状态
+                            if (isHazmatRecognizing) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(ErrorRed.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = ErrorRed,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("正在识别危化品标识...", fontSize = 13.sp, color = ErrorRed)
+                                }
+                            }
+
+                            // 识别结果显示
+                            hazmatRecognitionResult?.let { result ->
+                                result.hazmatClass?.let { hazmatClass ->
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = Color(hazmatClass.colorInt).copy(alpha = 0.15f)
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // 危化品类别图标
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .background(Color(hazmatClass.colorInt), RoundedCornerShape(8.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = hazmatClass.code,
+                                                    color = Color.White,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.width(12.dp))
+
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = hazmatClass.name,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TextPrimary
+                                                )
+                                                Text(
+                                                    text = "置信度: ${(result.confidence * 100).toInt()}%",
+                                                    fontSize = 12.sp,
+                                                    color = TextSecondary
+                                                )
+                                            }
+
+                                            // 已识别标识
+                                            Icon(
+                                                imageVector = Icons.Rounded.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(hazmatClass.colorInt),
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 手动输入（识别后可修改）
+                    StyledTextField(
+                        value = hazardClass,
+                        onValueChange = { hazardClass = it },
+                        label = "危化品类别（可手动修改）",
+                        leadingIcon = Icons.Rounded.Warning
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

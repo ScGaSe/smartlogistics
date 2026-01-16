@@ -355,7 +355,7 @@ fun DetailScreenTemplate(
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "返回",
                                 tint = TextPrimary
                             )

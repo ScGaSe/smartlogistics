@@ -1,5 +1,8 @@
 package com.example.smartlogistics.ui.screens
 
+import CongestionDetailCard
+import TTITrendChart
+import TimeRangeSelector
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -41,6 +44,7 @@ import android.net.Uri
 import android.graphics.Bitmap
 import kotlinx.coroutines.*
 import com.example.smartlogistics.utils.TFLiteHelper
+import generateMockCongestionData
 
 // ==================== 私家车主主页 ====================
 @Composable
@@ -79,7 +83,7 @@ fun CarHomeScreen(
             gradientBrush = Brush.linearGradient(
                 colors = listOf(CarGreen, CarGreenDark)
             ),
-            onSearchClick = { navController.navigate("navigation_map_new") },
+            onSearchClick = { navController.navigate("navigation_map") },
             onAiClick = { navController.navigate("ai_chat") }
         )
         
@@ -647,43 +651,336 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
 @Composable
 fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = null) {
     var destination by remember { mutableStateOf("") }
-    
-    DetailScreenTemplate(navController = navController, title = "路线规划", backgroundColor = BackgroundPrimary) {
-        AiEntryCard(title = "语音导航", subtitle = "说出目的地，智能规划路线", primaryColor = CarGreen, onClick = { navController.navigate("ai_chat") })
+    var showParkingRecommendation by remember { mutableStateOf(false) }
+
+    // 模拟停车场推荐数据
+    val recommendedParkingLots = remember {
+        listOf(
+            RecommendedParking("P1停车场", "距目的地200m", 45, 200, "¥5/h", true),
+            RecommendedParking("P2地下停车场", "距目的地350m", 12, 150, "¥6/h", false),
+            RecommendedParking("路边停车位", "距目的地100m", 3, 20, "¥8/h", false)
+        )
+    }
+
+    DetailScreenTemplate(
+        navController = navController,
+        title = "路线规划",
+        backgroundColor = BackgroundPrimary
+    ) {
+        // AI语音入口
+        AiEntryCard(
+            title = "语音导航",
+            subtitle = "说出目的地，智能规划路线",
+            primaryColor = CarGreen,
+            onClick = { navController.navigate("ai_chat") }
+        )
+
         Spacer(modifier = Modifier.height(20.dp))
-        
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+
+        // 路线输入卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(CarGreen, CircleShape))
+                // 起点
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(CarGreen, CircleShape)
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(text = "我的位置", fontSize = 15.sp, color = TextPrimary)
                 }
-                Box(modifier = Modifier.padding(start = 5.dp, top = 4.dp, bottom = 4.dp).width(2.dp).height(24.dp).background(BorderLight))
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(ErrorRed, CircleShape))
+
+                // 连接线
+                Box(
+                    modifier = Modifier
+                        .padding(start = 5.dp, top = 4.dp, bottom = 4.dp)
+                        .width(2.dp)
+                        .height(24.dp)
+                        .background(BorderLight)
+                )
+
+                // 终点输入
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(ErrorRed, CircleShape)
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
-                    OutlinedTextField(value = destination, onValueChange = { destination = it }, placeholder = { Text("输入目的地", color = TextTertiary) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CarGreen, unfocusedBorderColor = BorderLight), singleLine = true)
+                    OutlinedTextField(
+                        value = destination,
+                        onValueChange = {
+                            destination = it
+                            // 输入目的地后显示停车场推荐
+                            showParkingRecommendation = it.isNotBlank()
+                        },
+                        placeholder = { Text("输入目的地", color = TextTertiary) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CarGreen,
+                            unfocusedBorderColor = BorderLight
+                        ),
+                        singleLine = true
+                    )
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(text = "快捷目的地", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 快捷目的地
+        Text(
+            text = "快捷目的地",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
         Spacer(modifier = Modifier.height(12.dp))
-        
-        listOf(Icons.Rounded.Home to "家", Icons.Rounded.Work to "公司", Icons.Rounded.Flight to "机场").forEach { (icon, name) ->
-            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { destination = name; navController.navigate("ai_chat") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = icon, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+
+        listOf(
+            Icons.Rounded.Home to "家",
+            Icons.Rounded.Work to "公司",
+            Icons.Rounded.Flight to "机场"
+        ).forEach { (icon, name) ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .clickable {
+                        destination = name
+                        showParkingRecommendation = true
+                    },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = CarGreen,
+                        modifier = Modifier.size(24.dp)
+                    )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(text = name, fontSize = 15.sp, color = TextPrimary)
                 }
             }
         }
-        
+
+        // ==================== 停车场智能推荐 ====================
+        if (showParkingRecommendation && destination.isNotBlank()) {
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "推荐停车场",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
+                )
+
+                Text(
+                    text = "基于预测空位",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            recommendedParkingLots.forEach { parking ->
+                ParkingRecommendationCard(
+                    parking = parking,
+                    onSelect = {
+                        // 选择停车场后开始导航
+                        navController.navigate("navigation_map")
+                    }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // 智能建议
+            Spacer(modifier = Modifier.height(8.dp))
+            TipCard(
+                text = "P1停车场预计30分钟后车位紧张，建议尽快出发",
+                icon = Icons.Rounded.Lightbulb,
+                backgroundColor = CarGreenLight,
+                iconColor = CarGreen
+            )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map_new") }, enabled = destination.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Navigation)
+
+        // 导航按钮
+        PrimaryButton(
+            text = "开始导航",
+            onClick = { navController.navigate("navigation_map") },
+            enabled = destination.isNotBlank(),
+            backgroundColor = CarGreen,
+            icon = Icons.Rounded.Navigation
+        )
+    }
+}
+
+// ==================== 停车场推荐数据类 ====================
+data class RecommendedParking(
+    val name: String,
+    val distance: String,
+    val availableSpots: Int,
+    val totalSpots: Int,
+    val price: String,
+    val isRecommended: Boolean
+)
+
+// ==================== 停车场推荐卡片组件 ====================
+@Composable
+private fun ParkingRecommendationCard(
+    parking: RecommendedParking,
+    onSelect: () -> Unit
+) {
+    val availabilityPercent = parking.availableSpots.toFloat() / parking.totalSpots
+    val availabilityColor = when {
+        availabilityPercent > 0.3f -> Color(0xFF22C55E)  // 充足 - 绿色
+        availabilityPercent > 0.1f -> Color(0xFFFBBF24)  // 适中 - 黄色
+        availabilityPercent > 0f -> Color(0xFFF97316)   // 紧张 - 橙色
+        else -> Color(0xFFEF4444)                        // 已满 - 红色
+    }
+
+    val availabilityLabel = when {
+        availabilityPercent > 0.3f -> "充足"
+        availabilityPercent > 0.1f -> "适中"
+        availabilityPercent > 0f -> "紧张"
+        else -> "已满"
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (parking.isRecommended) CarGreen.copy(alpha = 0.05f) else Color.White
+        ),
+        border = if (parking.isRecommended) BorderStroke(1.5.dp, CarGreen) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 停车场图标
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        if (parking.isRecommended) CarGreen.copy(alpha = 0.15f)
+                        else BackgroundSecondary,
+                        RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.LocalParking,
+                    contentDescription = null,
+                    tint = if (parking.isRecommended) CarGreen else TextSecondary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // 停车场信息
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = parking.name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                    if (parking.isRecommended) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = CarGreen
+                        ) {
+                            Text(
+                                text = "推荐",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = parking.distance,
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "•",
+                        fontSize = 12.sp,
+                        color = TextTertiary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = parking.price,
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            // 空位信息
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(availabilityColor, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = availabilityLabel,
+                        fontSize = 13.sp,
+                        color = availabilityColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${parking.availableSpots}/${parking.totalSpots}",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+        }
     }
 }
 
@@ -736,77 +1033,504 @@ private fun CarTrafficLegendItem(color: Color, label: String) {
 // ==================== 拥堵预测页面 ====================
 @Composable
 fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "拥堵预测", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth().height(280.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    // 数据状态
+    val congestionData = remember { generateMockCongestionData() }
+    var selectedTimeRange by remember { mutableStateOf("今天") }
+    var selectedDataIndex by remember { mutableStateOf(10) } // 默认选中16:00
+
+    // 模拟停车场入口数据
+    val parkingEntrances = remember {
+        listOf(
+            Triple("P1停车场入口", "300m", CongestionLevel.FREE),
+            Triple("P2停车场入口", "500m", CongestionLevel.LIGHT),
+            Triple("P3停车场入口", "800m", CongestionLevel.MODERATE),
+            Triple("航站楼落客区", "200m", CongestionLevel.SEVERE),
+            Triple("高铁站停车场", "1.2km", CongestionLevel.LIGHT)
+        )
+    }
+
+    DetailScreenTemplate(
+        navController = navController,
+        title = "拥堵预测",
+        backgroundColor = BackgroundPrimary
+    ) {
+        // 时间选择器
+        TimeRangeSelector(
+            selectedRange = selectedTimeRange,
+            onRangeSelected = { selectedTimeRange = it },
+            primaryColor = CarGreen
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 图表卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(text = "未来2小时拥堵预测", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Box(modifier = Modifier.fillMaxWidth().height(160.dp).background(BackgroundSecondary, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                    Text(text = "拥堵趋势图\n(TTI指数)", color = TextSecondary, textAlign = TextAlign.Center)
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = "🟢 当前: 畅通", fontSize = 13.sp, color = CongestionFree)
-                    Text(text = "⚠️ 15:45预计拥堵", fontSize = 13.sp, color = CongestionModerate)
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(20.dp))
-        TipCard(text = "建议避开15:30-16:00时段出行。", icon = Icons.Rounded.Lightbulb, backgroundColor = CarGreenLight, iconColor = CarGreen)
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(text = "停车场入口预测", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-        Spacer(modifier = Modifier.height(12.dp))
-        listOf(Triple("P1停车场", "畅通", CongestionFree), Triple("P2停车场", "缓行", CongestionLight), Triple("P3停车场", "拥堵", CongestionModerate)).forEach { (name, status, color) ->
-            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(imageVector = Icons.Rounded.LocalParking, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(text = name, fontSize = 15.sp, color = TextPrimary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "道路拥堵趋势预测",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+
+                    // 图例
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CongestionLevel.values().take(3).forEach { level ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(level.color, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = level.label,
+                                    fontSize = 10.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
                     }
-                    Text(text = status, fontSize = 14.sp, color = color, fontWeight = FontWeight.Medium)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // TTI趋势图
+                TTITrendChart(
+                    data = congestionData,
+                    selectedIndex = selectedDataIndex,
+                    onPointSelected = { selectedDataIndex = it },
+                    primaryColor = CarGreen
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 选中时间点详情
+        CongestionDetailCard(
+            dataPoint = congestionData[selectedDataIndex],
+            primaryColor = CarGreen
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 智能建议
+        val selectedData = congestionData[selectedDataIndex]
+        val suggestion = when (selectedData.level) {
+            CongestionLevel.FREE -> "当前时段路况良好，适合出行！"
+            CongestionLevel.LIGHT -> "轻微缓行，预计延误5-10分钟。"
+            CongestionLevel.MODERATE -> "建议提前15分钟出发，或选择备用路线。"
+            CongestionLevel.SEVERE -> "严重拥堵！建议改乘公共交通或延后出行。"
+        }
+
+        TipCard(
+            text = suggestion,
+            icon = Icons.Rounded.Lightbulb,
+            backgroundColor = CarGreenLight,
+            iconColor = CarGreen
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 停车场入口状态
+        Text(
+            text = "停车场入口实时状态",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        parkingEntrances.forEach { (name, distance, level) ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .clickable { navController.navigate("navigation_map") },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.LocalParking,
+                            contentDescription = null,
+                            tint = CarGreen,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = name,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = distance,
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = level.color.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = level.label,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = level.color
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 开始导航按钮
+        PrimaryButton(
+            text = "规划最优路线",
+            onClick = { navController.navigate("navigation_map") },
+            backgroundColor = CarGreen,
+            icon = Icons.Rounded.Navigation
+        )
     }
 }
 
 // ==================== 历史数据页面 ====================
 @Composable
 fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "历史数据", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CarGreen)) {
+    // 模拟历史数据
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("本周", "本月", "全部")
+
+    val historyRecords = remember {
+        listOf(
+            CarHistoryRecord("2024-12-15", "家 → T2航站楼", 28.5, "42分钟", "接人"),
+            CarHistoryRecord("2024-12-14", "T1航站楼 → 万达广场", 15.2, "25分钟", "日常"),
+            CarHistoryRecord("2024-12-13", "公司 → 家", 18.0, "35分钟", "通勤"),
+            CarHistoryRecord("2024-12-12", "家 → 高铁站", 22.3, "38分钟", "送人"),
+            CarHistoryRecord("2024-12-11", "银泰商场 → 家", 12.5, "20分钟", "日常"),
+            CarHistoryRecord("2024-12-10", "家 → 公司", 18.0, "32分钟", "通勤"),
+            CarHistoryRecord("2024-12-09", "机场高速 → 市区", 35.0, "55分钟", "日常")
+        )
+    }
+
+    DetailScreenTemplate(
+        navController = navController,
+        title = "历史数据",
+        backgroundColor = BackgroundPrimary
+    ) {
+        // 统计卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = CarGreen)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(text = "本月出行统计", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
+                Text(
+                    text = "本月出行统计",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 14.sp
+                )
+
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "28", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "出行次数", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "486km", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "行驶里程", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    CarStatItem(value = "28", label = "出行次数")
+                    CarStatItem(value = "486", label = "总里程(km)")
+                    CarStatItem(value = "15h", label = "行驶时长")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 出行类型统计
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    CarStatItem(value = "12", label = "通勤")
+                    CarStatItem(value = "8", label = "日常出行")
+                    CarStatItem(value = "5", label = "接送人")
+                    CarStatItem(value = "3", label = "其他")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 出行趋势（简化图表）
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "本周出行趋势",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 简单的柱状图
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    val weekData = listOf(45, 30, 60, 25, 80, 55, 40)
+                    val days = listOf("一", "二", "三", "四", "五", "六", "日")
+
+                    weekData.forEachIndexed { index, value ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(24.dp)
+                                    .height((value * 0.8).dp)
+                                    .background(
+                                        CarGreen.copy(alpha = 0.7f + index * 0.04f),
+                                        RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = days[index],
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(text = "最近出行", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Tab 选择器
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                FilterChip(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    label = {
+                        Text(
+                            text = tab,
+                            fontWeight = if (selectedTab == index) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CarGreen.copy(alpha = 0.15f),
+                        selectedLabelColor = CarGreen
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 历史记录列表
+        Text(
+            text = "出行记录",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+
         Spacer(modifier = Modifier.height(12.dp))
-        listOf(Triple("2024-12-06", "T2航站楼 → 万达广场", "32km"), Triple("2024-12-05", "家 → T1航站楼", "28km")).forEach { (date, route, distance) ->
-            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(48.dp).background(CarGreenLight, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                        Icon(imageVector = Icons.Rounded.Route, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+
+        historyRecords.forEach { record ->
+            CarHistoryRecordCard(
+                record = record,
+                primaryColor = CarGreen
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 加载更多
+        TextButton(
+            onClick = { /* TODO: 加载更多 */ },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "加载更多记录",
+                color = CarGreen
+            )
+        }
+    }
+}
+
+// ==================== 私家车历史记录数据模型 ====================
+data class CarHistoryRecord(
+    val date: String,
+    val route: String,
+    val distance: Double,
+    val duration: String,
+    val tripType: String
+)
+
+// ==================== 统计项组件（私家车版） ====================
+@Composable
+private fun CarStatItem(
+    value: String,
+    label: String
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 11.sp
+        )
+    }
+}
+
+// ==================== 历史记录卡片（私家车版） ====================
+@Composable
+private fun CarHistoryRecordCard(
+    record: CarHistoryRecord,
+    primaryColor: Color
+) {
+    val tripIcon = when (record.tripType) {
+        "通勤" -> Icons.Rounded.Work
+        "接人", "送人" -> Icons.Rounded.PersonPinCircle
+        else -> Icons.Rounded.Route
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 图标
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        primaryColor.copy(alpha = 0.1f),
+                        RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = tripIcon,
+                    contentDescription = null,
+                    tint = primaryColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // 信息
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = record.route,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = record.date,
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = primaryColor.copy(alpha = 0.1f)
+                    ) {
+                        Text(
+                            text = record.tripType,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize = 10.sp,
+                            color = primaryColor
+                        )
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = route, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                        Text(text = date, fontSize = 12.sp, color = TextSecondary)
-                    }
-                    Text(text = distance, fontSize = 14.sp, color = CarGreen, fontWeight = FontWeight.SemiBold)
                 }
+            }
+
+            // 距离和时间
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "${record.distance}km",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = primaryColor
+                )
+                Text(
+                    text = record.duration,
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
             }
         }
     }
