@@ -360,6 +360,50 @@ fun MainAppEntry(viewModel: MainViewModel) {
                 )
             }
 
+            // ==================== 个人中心子页面 ====================
+            composable("edit_profile") {
+                EditProfileScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("account_security") {
+                AccountSecurityScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("notification_settings") {
+                NotificationSettingsScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("help_center") {
+                HelpCenterScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("about") {
+                AboutScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+            
+            composable("user_agreement") {
+                UserAgreementScreen(navController = navController)
+            }
+            
+            composable("privacy_policy") {
+                PrivacyPolicyScreen(navController = navController)
+            }
+
             // ==================== AI对话页面 ====================
             composable("ai_chat") {
                 AiChatScreen(

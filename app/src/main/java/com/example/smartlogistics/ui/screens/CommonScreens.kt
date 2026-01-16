@@ -1337,21 +1337,21 @@ fun UserProfileScreen(
                 icon = Icons.Rounded.Person,
                 title = "个人资料",
                 subtitle = "修改头像、昵称",
-                onClick = { }
+                onClick = { navController.navigate("edit_profile") }
             )
             
             ProfileMenuItem(
                 icon = Icons.Rounded.Security,
                 title = "账号安全",
                 subtitle = "密码、手机号",
-                onClick = { }
+                onClick = { navController.navigate("account_security") }
             )
             
             ProfileMenuItem(
                 icon = Icons.Rounded.Notifications,
                 title = "消息通知",
                 subtitle = "推送设置",
-                onClick = { }
+                onClick = { navController.navigate("notification_settings") }
             )
             
             Spacer(modifier = Modifier.height(8.dp))
@@ -1368,14 +1368,14 @@ fun UserProfileScreen(
                 icon = Icons.Rounded.Help,
                 title = "帮助中心",
                 subtitle = "常见问题、使用指南",
-                onClick = { }
+                onClick = { navController.navigate("help_center") }
             )
             
             ProfileMenuItem(
                 icon = Icons.Rounded.Info,
                 title = "关于我们",
                 subtitle = "版本 1.0.0",
-                onClick = { }
+                onClick = { navController.navigate("about") }
             )
             
             ProfileMenuItem(
@@ -1453,12 +1453,19 @@ fun SettingsScreen(
     navController: NavController,
     viewModel: MainViewModel? = null
 ) {
+    val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
     
     var darkMode by remember { mutableStateOf(false) }
     var autoUpdate by remember { mutableStateOf(true) }
     var locationService by remember { mutableStateOf(true) }
+    
+    // 缓存大小状态
+    var cacheSize by remember { mutableStateOf("128MB") }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
+    var showOfflineMapDialog by remember { mutableStateOf(false) }
+    var showSwitchAccountDialog by remember { mutableStateOf(false) }
     
     DetailScreenTemplate(
         navController = navController,
@@ -1479,7 +1486,10 @@ fun SettingsScreen(
                 title = "深色模式",
                 subtitle = "夜间使用更护眼",
                 checked = darkMode,
-                onCheckedChange = { darkMode = it }
+                onCheckedChange = { 
+                    darkMode = it
+                    Toast.makeText(context, if (it) "深色模式已开启" else "深色模式已关闭", Toast.LENGTH_SHORT).show()
+                }
             )
             
             HorizontalDivider(color = DividerColor)
@@ -1499,7 +1509,12 @@ fun SettingsScreen(
                 title = "位置服务",
                 subtitle = "允许获取位置信息",
                 checked = locationService,
-                onCheckedChange = { locationService = it }
+                onCheckedChange = { 
+                    locationService = it
+                    if (!it) {
+                        Toast.makeText(context, "关闭位置服务将影响导航功能", Toast.LENGTH_SHORT).show()
+                    }
+                }
             )
         }
         
@@ -1517,8 +1532,8 @@ fun SettingsScreen(
             SettingsClickItem(
                 icon = Icons.Rounded.Cached,
                 title = "清除缓存",
-                subtitle = "当前缓存 128MB",
-                onClick = { }
+                subtitle = "当前缓存 $cacheSize",
+                onClick = { showClearCacheDialog = true }
             )
             
             HorizontalDivider(color = DividerColor)
@@ -1527,7 +1542,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Download,
                 title = "离线地图",
                 subtitle = "管理已下载的地图",
-                onClick = { }
+                onClick = { showOfflineMapDialog = true }
             )
         }
         
@@ -1546,7 +1561,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.SwapHoriz,
                 title = "切换账号",
                 subtitle = "登录其他账号",
-                onClick = { }
+                onClick = { showSwitchAccountDialog = true }
             )
         }
         
@@ -1591,6 +1606,118 @@ fun SettingsScreen(
             color = TextTertiary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
+        )
+    }
+    
+    // 清除缓存对话框
+    if (showClearCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheDialog = false },
+            icon = { Icon(Icons.Rounded.Cached, contentDescription = null, tint = primaryColor) },
+            title = { Text("清除缓存") },
+            text = { Text("确定要清除应用缓存吗？这将清除临时文件和图片缓存，不会影响您的账号数据。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // 清除缓存逻辑
+                        try {
+                            context.cacheDir.deleteRecursively()
+                            cacheSize = "0MB"
+                            Toast.makeText(context, "缓存已清除", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "清除失败，请重试", Toast.LENGTH_SHORT).show()
+                        }
+                        showClearCacheDialog = false
+                    }
+                ) {
+                    Text("确定", color = primaryColor)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+    
+    // 离线地图对话框
+    if (showOfflineMapDialog) {
+        AlertDialog(
+            onDismissRequest = { showOfflineMapDialog = false },
+            icon = { Icon(Icons.Rounded.Map, contentDescription = null, tint = primaryColor) },
+            title = { Text("离线地图") },
+            text = { 
+                Column {
+                    Text("已下载的地图包：")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("当前城市", fontWeight = FontWeight.Medium)
+                            Text("约 256MB", fontSize = 12.sp, color = TextSecondary)
+                        }
+                        TextButton(onClick = {
+                            Toast.makeText(context, "地图删除功能开发中", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text("删除", color = ErrorRed)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "提示：离线地图可在无网络时使用导航功能",
+                        fontSize = 12.sp,
+                        color = TextTertiary
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        Toast.makeText(context, "下载更多地图功能开发中", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("下载更多", color = primaryColor)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOfflineMapDialog = false }) {
+                    Text("关闭")
+                }
+            }
+        )
+    }
+    
+    // 切换账号对话框
+    if (showSwitchAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showSwitchAccountDialog = false },
+            icon = { Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = primaryColor) },
+            title = { Text("切换账号") },
+            text = { Text("切换账号将退出当前账号，确定要继续吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSwitchAccountDialog = false
+                        viewModel?.logout()
+                        navController.navigate("login") {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                ) {
+                    Text("确定切换", color = primaryColor)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSwitchAccountDialog = false }) {
+                    Text("取消")
+                }
+            }
         )
     }
 }
