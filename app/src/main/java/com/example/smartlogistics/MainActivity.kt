@@ -175,7 +175,12 @@ fun MainAppEntry(viewModel: MainViewModel) {
         NavHost(
             navController = navController,
             startDestination = "login",
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            // 禁用页面切换动画，避免"弹一下"
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None }
         ) {
             // ==================== 认证模块 ====================
             composable("login") {
@@ -402,6 +407,13 @@ fun MainAppEntry(viewModel: MainViewModel) {
             
             composable("privacy_policy") {
                 PrivacyPolicyScreen(navController = navController)
+            }
+            
+            composable("offline_map") {
+                OfflineMapScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
             }
 
             // ==================== AI对话页面 ====================

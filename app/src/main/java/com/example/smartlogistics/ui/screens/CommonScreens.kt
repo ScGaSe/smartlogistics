@@ -1464,7 +1464,6 @@ fun SettingsScreen(
     // 缓存大小状态
     var cacheSize by remember { mutableStateOf("128MB") }
     var showClearCacheDialog by remember { mutableStateOf(false) }
-    var showOfflineMapDialog by remember { mutableStateOf(false) }
     var showSwitchAccountDialog by remember { mutableStateOf(false) }
     
     DetailScreenTemplate(
@@ -1542,7 +1541,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Download,
                 title = "离线地图",
                 subtitle = "管理已下载的地图",
-                onClick = { showOfflineMapDialog = true }
+                onClick = { navController.navigate("offline_map") }
             )
         }
         
@@ -1636,58 +1635,6 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showClearCacheDialog = false }) {
                     Text("取消")
-                }
-            }
-        )
-    }
-    
-    // 离线地图对话框
-    if (showOfflineMapDialog) {
-        AlertDialog(
-            onDismissRequest = { showOfflineMapDialog = false },
-            icon = { Icon(Icons.Rounded.Map, contentDescription = null, tint = primaryColor) },
-            title = { Text("离线地图") },
-            text = { 
-                Column {
-                    Text("已下载的地图包：")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("当前城市", fontWeight = FontWeight.Medium)
-                            Text("约 256MB", fontSize = 12.sp, color = TextSecondary)
-                        }
-                        TextButton(onClick = {
-                            Toast.makeText(context, "地图删除功能开发中", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("删除", color = ErrorRed)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "提示：离线地图可在无网络时使用导航功能",
-                        fontSize = 12.sp,
-                        color = TextTertiary
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        Toast.makeText(context, "下载更多地图功能开发中", Toast.LENGTH_SHORT).show()
-                    }
-                ) {
-                    Text("下载更多", color = primaryColor)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showOfflineMapDialog = false }) {
-                    Text("关闭")
                 }
             }
         )
