@@ -49,6 +49,7 @@ import com.example.smartlogistics.utils.HazmatRecognitionHelper
 import com.example.smartlogistics.utils.HazmatRecognitionResult
 import com.example.smartlogistics.utils.TFLiteHelper
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
+import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.ReportState
@@ -61,6 +62,7 @@ import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.location.AMapLocation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 
@@ -213,6 +215,9 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     var recognitionResult by remember { mutableStateOf<String?>(null) }
     val tfliteHelper = remember { TFLiteHelper(context) }
     
+    // ========== 相机拍照 Uri（重要！FileProvider 需要）==========
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    
     // ========== 生命周期安全的协程作用域 ==========
     val coroutineScope = rememberCoroutineScope()
 
@@ -249,19 +254,24 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
         }
     }
 
-    // 2. 相机拍照 Launcher
+    // 2. 相机拍照 Launcher - 使用 TakePicture（需要传入 Uri）
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        bitmap?.let {
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && photoUri != null) {
             isRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val result = tfliteHelper.recognizePlate(it)
+                    val bitmap = tfliteHelper.loadImageFromUri(photoUri!!)
+                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
-                        plateNumber = result
-                        recognitionResult = "识别成功: $result"
+                        result?.let { plate ->
+                            plateNumber = plate
+                            recognitionResult = "识别成功: $plate"
+                        } ?: run {
+                            recognitionResult = "识别失败，请重试"
+                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -270,6 +280,8 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                     }
                 }
             }
+        } else {
+            recognitionResult = "拍照取消或失败"
         }
     }
 
@@ -278,9 +290,27 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            cameraLauncher.launch(null)
+            // 权限已授予，创建 Uri 并启动相机
+            photoUri = CameraUtils.createImageUri(context)
+            photoUri?.let { cameraLauncher.launch(it) }
         } else {
             Toast.makeText(context, "需要相机权限才能拍照识别", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    // 启动相机的函数
+    fun launchCamera() {
+        if (CameraUtils.hasCameraPermission(context)) {
+            // 已有权限，直接创建 Uri 并启动相机
+            photoUri = CameraUtils.createImageUri(context)
+            photoUri?.let { 
+                cameraLauncher.launch(it) 
+            } ?: run {
+                recognitionResult = "无法创建图片文件"
+            }
+        } else {
+            // 请求权限
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -407,22 +437,11 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 拍照识别按钮 - 只调用 launch()，不声明 launcher
+                    // 拍照识别按钮 - 调用 launchCamera() 函数
                     Card(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable {
-                                // 检查权限
-                                if (ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.CAMERA
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    cameraLauncher.launch(null)
-                                } else {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
-                            },
+                            .clickable { launchCamera() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = TruckOrange.copy(alpha = 0.1f))
                     ) {
@@ -449,7 +468,7 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                         }
                     }
 
-                    // 相册选择按钮 - 只调用 launch()，不声明 launcher
+                    // 相册选择按钮
                     Card(
                         modifier = Modifier
                             .weight(1f)
@@ -1842,7 +1861,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     var selectedVehicleId by remember { mutableStateOf("") }
     val isLoading = reportState is ReportState.Loading
-
+    val coroutineScope = rememberCoroutineScope()
     // ========== 语音识别相关状态 ==========
     val speechHelper = remember { XunfeiSpeechHelper() }
     val speechState by speechHelper.state.collectAsState()
@@ -1922,6 +1941,9 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val hazmatHelper = remember { HazmatRecognitionHelper(context) }
     var isHazmatRecognizing by remember { mutableStateOf(false) }
     var hazmatRecognitionResult by remember { mutableStateOf<HazmatRecognitionResult?>(null) }
+    
+    // 危化品相机拍照的 Uri
+    var hazmatPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
     // 危化品图片选择器
     val hazmatImagePickerLauncher = rememberLauncherForActivityResult(
@@ -1929,34 +1951,49 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     ) { uri: Uri? ->
         uri?.let {
             isHazmatRecognizing = true
-            CoroutineScope(Dispatchers.IO).launch {
-                val bitmap = hazmatHelper.loadImageFromUri(it)
-                val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val bitmap = hazmatHelper.loadImageFromUri(it)
+                    val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
 
-                withContext(Dispatchers.Main) {
-                    isHazmatRecognizing = false
-                    result?.let { res ->
-                        hazmatRecognitionResult = res
-                        res.hazmatClass?.let { hazardClass = it.name }
+                    withContext(Dispatchers.Main) {
+                        isHazmatRecognizing = false
+                        result?.let { res ->
+                            hazmatRecognitionResult = res
+                            res.hazmatClass?.let { hazardClass = it.name }
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isHazmatRecognizing = false
                     }
                 }
             }
         }
     }
 
-    // 危化品相机拍照
+    // 危化品相机拍照 - 使用 TakePicture
     val hazmatCameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        bitmap?.let {
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && hazmatPhotoUri != null) {
             isHazmatRecognizing = true
-            CoroutineScope(Dispatchers.IO).launch {
-                val result = hazmatHelper.recognizeHazmat(it)
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val bitmap = hazmatHelper.loadImageFromUri(hazmatPhotoUri!!)
+                    val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
 
-                withContext(Dispatchers.Main) {
-                    isHazmatRecognizing = false
-                    hazmatRecognitionResult = result
-                    result.hazmatClass?.let { hazardClass = it.name }
+                    withContext(Dispatchers.Main) {
+                        isHazmatRecognizing = false
+                        result?.let { res ->
+                            hazmatRecognitionResult = res
+                            res.hazmatClass?.let { hazardClass = it.name }
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isHazmatRecognizing = false
+                    }
                 }
             }
         }
@@ -1967,7 +2004,18 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            hazmatCameraLauncher.launch(null)
+            hazmatPhotoUri = CameraUtils.createImageUri(context)
+            hazmatPhotoUri?.let { hazmatCameraLauncher.launch(it) }
+        }
+    }
+    
+    // 启动危化品相机的函数
+    fun launchHazmatCamera() {
+        if (CameraUtils.hasCameraPermission(context)) {
+            hazmatPhotoUri = CameraUtils.createImageUri(context)
+            hazmatPhotoUri?.let { hazmatCameraLauncher.launch(it) }
+        } else {
+            hazmatCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -2128,15 +2176,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                             ) {
                                 // 拍照识别
                                 OutlinedButton(
-                                    onClick = {
-                                        when (PackageManager.PERMISSION_GRANTED) {
-                                            ContextCompat.checkSelfPermission(
-                                                context,
-                                                android.Manifest.permission.CAMERA
-                                            ) -> hazmatCameraLauncher.launch(null)
-                                            else -> hazmatCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-                                        }
-                                    },
+                                    onClick = { launchHazmatCamera() },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(1.dp, ErrorRed)

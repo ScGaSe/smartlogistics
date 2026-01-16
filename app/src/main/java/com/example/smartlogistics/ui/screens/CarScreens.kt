@@ -47,6 +47,7 @@ import android.net.Uri
 import android.graphics.Bitmap
 import kotlinx.coroutines.*
 import com.example.smartlogistics.utils.TFLiteHelper
+import com.example.smartlogistics.utils.CameraUtils
 import generateMockCongestionData
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
@@ -251,6 +252,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var showCamera by remember { mutableStateOf(false) }
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<String?>(null) }
+    
+    // 相机拍照的 Uri（重要！用于 FileProvider）
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -286,20 +290,25 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
-    // 相机拍照
+    // 相机拍照 - 使用 TakePicture（需要传入 Uri）
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        bitmap?.let {
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && photoUri != null) {
             isRecognizing = true
             scope.launch(Dispatchers.IO) {
                 try {
-                    val result = tfliteHelper.recognizePlate(it)
+                    val bitmap = tfliteHelper.loadImageFromUri(photoUri!!)
+                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
 
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
-                        plateNumber = result
-                        recognitionResult = "识别成功: $result"
+                        result?.let { plate ->
+                            plateNumber = plate
+                            recognitionResult = "识别成功: $plate"
+                        } ?: run {
+                            recognitionResult = "识别失败，请重试"
+                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -308,7 +317,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     }
                 }
             }
-        } ?: run {
+        } else {
             recognitionResult = "拍照取消或失败"
         }
     }
@@ -318,9 +327,27 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            cameraLauncher.launch(null)
+            // 权限已授予，创建 Uri 并启动相机
+            photoUri = CameraUtils.createImageUri(context)
+            photoUri?.let { cameraLauncher.launch(it) }
         } else {
             recognitionResult = "需要相机权限才能拍照识别"
+        }
+    }
+    
+    // 启动相机的函数
+    fun launchCamera() {
+        if (CameraUtils.hasCameraPermission(context)) {
+            // 已有权限，直接创建 Uri 并启动相机
+            photoUri = CameraUtils.createImageUri(context)
+            photoUri?.let { 
+                cameraLauncher.launch(it) 
+            } ?: run {
+                recognitionResult = "无法创建图片文件"
+            }
+        } else {
+            // 请求权限
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -376,19 +403,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     Card(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable {
-                                when (PackageManager.PERMISSION_GRANTED) {
-                                    ContextCompat.checkSelfPermission(
-                                        context,
-                                        android.Manifest.permission.CAMERA
-                                    ) -> {
-                                        cameraLauncher.launch(null)
-                                    }
-                                    else -> {
-                                        cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-                                    }
-                                }
-                            },
+                            .clickable { launchCamera() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
                     ) {
