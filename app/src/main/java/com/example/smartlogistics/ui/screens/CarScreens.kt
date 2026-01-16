@@ -74,6 +74,20 @@ import com.amap.api.location.AMapLocationClientOption
 import com.example.smartlogistics.utils.ParkingManager
 import kotlinx.coroutines.delay
 import java.io.File
+import coil.compose.rememberAsyncImagePainter
+
+// ==================== 行程OCR识别结果数据类 ====================
+data class TripOcrResult(
+    val tripType: String,           // flight / train
+    val tripNumber: String,         // 航班号/车次
+    val tripDate: String,           // 出发日期
+    val departureCity: String? = null,  // 出发城市
+    val arrivalCity: String? = null,    // 到达城市
+    val departureTime: String? = null,  // 出发时间
+    val passengerName: String? = null,  // 乘客姓名
+    val seatInfo: String? = null,       // 座位信息
+    val confidence: Float = 0.95f       // 识别置信度
+)
 
 // ==================== 私家车主主页 ====================
 @Composable
@@ -2689,12 +2703,96 @@ private fun CarHistoryRecordCard(
 // ==================== 我的行程页面 ====================
 @Composable
 fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     var tripType by remember { mutableStateOf("flight") }
     var tripNumber by remember { mutableStateOf("") }
     var tripDate by remember { mutableStateOf("") }
     val tripState by viewModel?.tripState?.collectAsState() ?: remember { mutableStateOf(TripState.Idle) }
     val trips by viewModel?.trips?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val isLoading = tripState is TripState.Loading
+    
+    // ==================== 图片识别相关状态 ====================
+    var showImagePickerDialog by remember { mutableStateOf(false) }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var isRecognizing by remember { mutableStateOf(false) }
+    var recognitionResult by remember { mutableStateOf<TripOcrResult?>(null) }
+    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    
+    // 执行OCR识别
+    fun performOcrRecognition(imageUri: Uri, currentTripType: String) {
+        isRecognizing = true
+        recognitionResult = null
+        
+        scope.launch {
+            delay(1800) // 模拟识别过程
+            
+            // TODO: 调用后端 POST /trips/ocr 接口
+            val mockResult = if (currentTripType == "flight") {
+                TripOcrResult(
+                    tripType = "flight",
+                    tripNumber = "MU${(1000..9999).random()}",
+                    tripDate = "2026-01-${(20..28).random()}",
+                    departureCity = "长沙",
+                    arrivalCity = "北京",
+                    departureTime = "${(6..20).random()}:${listOf("00", "30", "45").random()}",
+                    passengerName = "张*明",
+                    seatInfo = "${(1..30).random()}${listOf("A", "B", "C", "D", "E", "F").random()}",
+                    confidence = 0.92f + (Math.random() * 0.07f).toFloat()
+                )
+            } else {
+                TripOcrResult(
+                    tripType = "train",
+                    tripNumber = "${listOf("G", "D", "K", "Z").random()}${(100..9999).random()}",
+                    tripDate = "2026-01-${(20..28).random()}",
+                    departureCity = "长沙南",
+                    arrivalCity = "广州南",
+                    departureTime = "${(6..22).random()}:${listOf("00", "15", "30", "45").random()}",
+                    passengerName = "张*明",
+                    seatInfo = "${(1..16).random()}车${(1..100).random()}${listOf("A", "B", "C", "D", "F").random()}座",
+                    confidence = 0.89f + (Math.random() * 0.10f).toFloat()
+                )
+            }
+            
+            recognitionResult = mockResult
+            tripNumber = mockResult.tripNumber
+            tripDate = mockResult.tripDate
+            tripType = mockResult.tripType
+            isRecognizing = false
+        }
+    }
+    
+    // 相机拍照
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && cameraPhotoUri != null) {
+            selectedImageUri = cameraPhotoUri
+            performOcrRecognition(cameraPhotoUri!!, tripType)
+        }
+    }
+    
+    // 相册选择
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            selectedImageUri = it
+            performOcrRecognition(it, tripType)
+        }
+    }
+    
+    // 相机权限
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val uri = CameraUtils.createImageUri(context)
+            cameraPhotoUri = uri
+            cameraLauncher.launch(uri)
+        }
+    }
     
     DetailScreenTemplate(navController = navController, title = "我的行程", backgroundColor = BackgroundPrimary) {
         // ==================== 接人/送人模式 ====================
@@ -2747,20 +2845,13 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // 开始共享位置按钮 - 跳转到位置共享页面
                 Button(
                     onClick = { navController.navigate("location_share") },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF667EEA)
-                    )
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF667EEA))
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Share,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(imageVector = Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "开始共享位置", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
@@ -2793,17 +2884,210 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             Spacer(modifier = Modifier.height(20.dp))
         }
         
-        Text(text = "添加新行程", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+        // ==================== 智能识别卡片 ====================
+        Text(text = "智能识别", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(color = CarGreen.copy(alpha = 0.1f), shape = RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(imageVector = Icons.Rounded.DocumentScanner, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "拍照识别行程", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Text(text = "拍摄机票、火车票自动识别信息", fontSize = 13.sp, color = TextSecondary)
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 图片预览区域
+                if (selectedImageUri != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BackgroundSecondary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(selectedImageUri),
+                            contentDescription = "票据图片",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        
+                        if (isRecognizing) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(40.dp), strokeWidth = 3.dp)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(text = "正在识别票据...", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                        
+                        if (!isRecognizing) {
+                            IconButton(
+                                onClick = { selectedImageUri = null; recognitionResult = null; tripNumber = ""; tripDate = "" },
+                                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(imageVector = Icons.Rounded.Close, contentDescription = "清除", tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                    
+                    // 识别结果展示
+                    if (recognitionResult != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth().background(SuccessGreenLight, RoundedCornerShape(8.dp)).padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(imageVector = Icons.Rounded.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = "识别成功！", fontSize = 14.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
+                                Text(text = "置信度: ${String.format("%.1f", recognitionResult!!.confidence * 100)}%", fontSize = 12.sp, color = SuccessGreen.copy(alpha = 0.8f))
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // 识别详情卡片
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.05f)),
+                            border = BorderStroke(1.dp, CarGreen.copy(alpha = 0.2f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (recognitionResult!!.tripType == "flight") Icons.Rounded.Flight else Icons.Rounded.Train,
+                                        contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = recognitionResult!!.tripNumber, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CarGreen)
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Surface(color = CarGreen, shape = RoundedCornerShape(6.dp)) {
+                                        Text(
+                                            text = if (recognitionResult!!.tripType == "flight") "航班" else "火车",
+                                            fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Column(horizontalAlignment = Alignment.Start) {
+                                        Text(text = recognitionResult!!.departureCity ?: "--", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                        Text(text = recognitionResult!!.departureTime ?: "--:--", fontSize = 14.sp, color = TextSecondary)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 16.dp)) {
+                                        Icon(imageVector = Icons.Rounded.ArrowForward, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+                                        Text(text = recognitionResult!!.tripDate, fontSize = 12.sp, color = TextTertiary)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(text = recognitionResult!!.arrivalCity ?: "--", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                        Text(text = "预计到达", fontSize = 14.sp, color = TextSecondary)
+                                    }
+                                }
+                                
+                                if (recognitionResult!!.passengerName != null || recognitionResult!!.seatInfo != null) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    HorizontalDivider(color = DividerColor)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        if (recognitionResult!!.passengerName != null) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(imageVector = Icons.Rounded.Person, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(text = recognitionResult!!.passengerName!!, fontSize = 13.sp, color = TextSecondary)
+                                            }
+                                        }
+                                        if (recognitionResult!!.seatInfo != null) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(imageVector = Icons.Rounded.EventSeat, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(text = recognitionResult!!.seatInfo!!, fontSize = 13.sp, color = TextSecondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = "💡 信息已自动填充到下方表单", fontSize = 12.sp, color = TextTertiary, modifier = Modifier.padding(horizontal = 4.dp))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+                
+                // 拍照/相册按钮
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { showImagePickerDialog = true },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.5.dp, CarGreen),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CarGreen)
+                    ) {
+                        Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "拍照识别", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                    
+                    OutlinedButton(
+                        onClick = { galleryLauncher.launch("image/*") },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.5.dp, CarGreen),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CarGreen)
+                    ) {
+                        Icon(imageVector = Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "相册选择", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // ==================== 手动添加行程 ====================
+        Text(text = "手动添加", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf("flight" to "航班" to Icons.Rounded.Flight, "train" to "火车" to Icons.Rounded.Train).forEach { (typeLabel, icon) ->
                 val (type, label) = typeLabel
-                Card(modifier = Modifier.weight(1f).height(80.dp).clickable { tripType = type }, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = if (tripType == type) CarGreen.copy(alpha = 0.1f) else Color.White), border = if (tripType == type) BorderStroke(2.dp, CarGreen) else null) {
+                Card(modifier = Modifier.weight(1f).height(72.dp).clickable { tripType = type }, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = if (tripType == type) CarGreen.copy(alpha = 0.1f) else Color.White), border = if (tripType == type) BorderStroke(2.dp, CarGreen) else null) {
                     Row(modifier = Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(imageVector = icon, contentDescription = null, tint = if (tripType == type) CarGreen else TextSecondary, modifier = Modifier.size(28.dp))
+                        Icon(imageVector = icon, contentDescription = null, tint = if (tripType == type) CarGreen else TextSecondary, modifier = Modifier.size(26.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = label, fontSize = 16.sp, fontWeight = if (tripType == type) FontWeight.SemiBold else FontWeight.Normal, color = if (tripType == type) CarGreen else TextSecondary)
+                        Text(text = label, fontSize = 15.sp, fontWeight = if (tripType == type) FontWeight.SemiBold else FontWeight.Normal, color = if (tripType == type) CarGreen else TextSecondary)
                     }
                 }
             }
@@ -2815,11 +3099,66 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             Column(modifier = Modifier.padding(20.dp)) {
                 StyledTextField(value = tripNumber, onValueChange = { tripNumber = it.uppercase() }, label = if (tripType == "flight") "航班号 (如 MU5521)" else "车次号 (如 G1234)", leadingIcon = if (tripType == "flight") Icons.Rounded.Flight else Icons.Rounded.Train)
                 Spacer(modifier = Modifier.height(16.dp))
-                StyledTextField(value = tripDate, onValueChange = { tripDate = it }, label = "出发日期 (如 2024-12-06)", leadingIcon = Icons.Rounded.CalendarToday)
+                StyledTextField(value = tripDate, onValueChange = { tripDate = it }, label = "出发日期 (如 2025-01-20)", leadingIcon = Icons.Rounded.CalendarToday)
             }
         }
         
         Spacer(modifier = Modifier.height(16.dp))
         PrimaryButton(text = "关联行程", onClick = { viewModel?.createTrip(tripType, tripNumber, tripDate) }, isLoading = isLoading, enabled = tripNumber.isNotBlank() && tripDate.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Add)
+    }
+    
+    // ==================== 图片来源选择对话框 ====================
+    if (showImagePickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showImagePickerDialog = false },
+            title = { Text(text = "选择图片来源", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            showImagePickerDialog = false
+                            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                val uri = CameraUtils.createImageUri(context)
+                                cameraPhotoUri = uri
+                                cameraLauncher.launch(uri)
+                            } else {
+                                cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                            }
+                        }.padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.size(44.dp).background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(text = "拍照", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text(text = "使用相机拍摄票据", fontSize = 13.sp, color = TextSecondary)
+                        }
+                    }
+                    
+                    HorizontalDivider(color = DividerColor)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            showImagePickerDialog = false
+                            galleryLauncher.launch("image/*")
+                        }.padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.size(44.dp).background(Color(0xFF667EEA).copy(alpha = 0.1f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(imageVector = Icons.Rounded.PhotoLibrary, contentDescription = null, tint = Color(0xFF667EEA), modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(text = "从相册选择", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text(text = "选择已有的票据图片", fontSize = 13.sp, color = TextSecondary)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showImagePickerDialog = false }) { Text("取消", color = TextSecondary) } }
+        )
     }
 }

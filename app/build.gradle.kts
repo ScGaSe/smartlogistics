@@ -70,7 +70,8 @@ dependencies {
     // 从而解决了 Compose 权限请求闪退的问题。
     implementation("androidx.fragment:fragment-ktx:1.6.2")
     implementation("androidx.appcompat:appcompat:1.6.1")
-
+    //coil
+    implementation("io.coil-kt:coil-compose:2.5.0")
     // Activity Compose
     implementation("androidx.activity:activity-compose:1.8.2")
 
