@@ -18,7 +18,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        
+
         // 高德地图 NDK 配置
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
@@ -47,13 +47,9 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
     }
+
+    // 优化：合并 packaging 配置，使用新的 DSL 写法
     packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-    }
-    // 添加这个配置，强制排除重复类
-    packagingOptions {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             pickFirsts += listOf(
@@ -68,8 +64,16 @@ dependencies {
     // Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+
+    // ✅ 关键修改：显式引入新版 Fragment 和 AppCompat
+    // 这两个库修复了 FragmentActivity 对 RequestCode 的 16位限制，
+    // 从而解决了 Compose 权限请求闪退的问题。
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+
+    // Activity Compose
     implementation("androidx.activity:activity-compose:1.8.2")
-    
+
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")
@@ -78,28 +82,29 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
-    
+
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
-    
+
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    
+
     // Retrofit & Network
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    
+
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
-    
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // 生物识别（指纹登录）
-    implementation("androidx.biometric:biometric:1.1.0")
+    // ✅ ,升级：生物识别（指纹登录）
+    // 升级到 1.2.0-alpha05 配合 Fragment 1.6+ 使用效果更好
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
 
     // 讯飞语音SDK
     implementation(files("libs/SparkChain.aar"))
