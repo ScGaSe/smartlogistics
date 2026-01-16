@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -28,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
@@ -45,6 +48,11 @@ import android.graphics.Bitmap
 import kotlinx.coroutines.*
 import com.example.smartlogistics.utils.TFLiteHelper
 import generateMockCongestionData
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.LatLng
+import com.amap.api.location.AMapLocation
+import kotlinx.coroutines.delay
 
 // ==================== 私家车主主页 ====================
 @Composable
@@ -245,6 +253,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var recognitionResult by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val tfliteHelper = remember { TFLiteHelper(context) }
 
     // 图片选择器
@@ -253,16 +262,24 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     ) { uri: Uri? ->
         uri?.let {
             isRecognizing = true
-            // 在协程中执行识别
-            CoroutineScope(Dispatchers.IO).launch {
-                val bitmap = tfliteHelper.loadImageFromUri(it)
-                val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val bitmap = tfliteHelper.loadImageFromUri(it)
+                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
 
-                withContext(Dispatchers.Main) {
-                    isRecognizing = false
-                    result?.let { plate ->
-                        plateNumber = plate
-                        recognitionResult = "识别成功: $plate"
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        result?.let { plate ->
+                            plateNumber = plate
+                            recognitionResult = "识别成功: $plate"
+                        } ?: run {
+                            recognitionResult = "识别失败，请重试"
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        recognitionResult = "识别出错: ${e.message}"
                     }
                 }
             }
@@ -275,15 +292,24 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     ) { bitmap: Bitmap? ->
         bitmap?.let {
             isRecognizing = true
-            CoroutineScope(Dispatchers.IO).launch {
-                val result = tfliteHelper.recognizePlate(it)
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val result = tfliteHelper.recognizePlate(it)
 
-                withContext(Dispatchers.Main) {
-                    isRecognizing = false
-                    plateNumber = result
-                    recognitionResult = "识别成功: $result"
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        plateNumber = result
+                        recognitionResult = "识别成功: $result"
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        recognitionResult = "识别出错: ${e.message}"
+                    }
                 }
             }
+        } ?: run {
+            recognitionResult = "拍照取消或失败"
         }
     }
 
@@ -667,21 +693,12 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         title = "路线规划",
         backgroundColor = BackgroundPrimary
     ) {
-        // AI语音入口
-        AiEntryCard(
-            title = "语音导航",
-            subtitle = "说出目的地，智能规划路线",
-            primaryColor = CarGreen,
-            onClick = { navController.navigate("ai_chat") }
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
         // 路线输入卡片
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 // 起点
@@ -695,15 +712,30 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
                             .background(CarGreen, CircleShape)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(text = "我的位置", fontSize = 15.sp, color = TextPrimary)
+                    Text(
+                        text = "我的位置",
+                        fontSize = 15.sp,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // 定位刷新按钮
+                    Icon(
+                        imageVector = Icons.Rounded.MyLocation,
+                        contentDescription = "定位",
+                        tint = CarGreen,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable { /* 刷新定位 */ }
+                    )
                 }
 
                 // 连接线
                 Box(
                     modifier = Modifier
-                        .padding(start = 5.dp, top = 4.dp, bottom = 4.dp)
+                        .padding(start = 5.dp, top = 8.dp, bottom = 8.dp)
                         .width(2.dp)
-                        .height(24.dp)
+                        .height(20.dp)
                         .background(BorderLight)
                 )
 
@@ -722,7 +754,6 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
                         value = destination,
                         onValueChange = {
                             destination = it
-                            // 输入目的地后显示停车场推荐
                             showParkingRecommendation = it.isNotBlank()
                         },
                         placeholder = { Text("输入目的地", color = TextTertiary) },
@@ -732,7 +763,20 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
                             focusedBorderColor = CarGreen,
                             unfocusedBorderColor = BorderLight
                         ),
-                        singleLine = true
+                        singleLine = true,
+                        trailingIcon = {
+                            // 语音输入按钮
+                            IconButton(
+                                onClick = { navController.navigate("ai_chat") }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mic,
+                                    contentDescription = "语音输入",
+                                    tint = CarGreen,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
                     )
                 }
             }
@@ -749,36 +793,36 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        listOf(
-            Icons.Rounded.Home to "家",
-            Icons.Rounded.Work to "公司",
-            Icons.Rounded.Flight to "机场"
-        ).forEach { (icon, name) ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
-                    .clickable {
-                        destination = name
-                        showParkingRecommendation = true
-                    },
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = CarGreen,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(text = name, fontSize = 15.sp, color = TextPrimary)
+        // 快捷目的地列表
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            CarQuickDestinationItem(
+                icon = Icons.Rounded.Home,
+                title = "家",
+                subtitle = "北京市海淀区中关村",
+                onClick = {
+                    // 直接跳转到导航页面
+                    val encodedDest = Uri.encode("北京市海淀区中关村")
+                    navController.navigate("navigation_map?destination=$encodedDest")
                 }
-            }
+            )
+            CarQuickDestinationItem(
+                icon = Icons.Rounded.Work,
+                title = "公司",
+                subtitle = "北京市朝阳区望京",
+                onClick = {
+                    val encodedDest = Uri.encode("北京市朝阳区望京")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
+            CarQuickDestinationItem(
+                icon = Icons.Rounded.Flight,
+                title = "机场",
+                subtitle = "北京首都国际机场",
+                onClick = {
+                    val encodedDest = Uri.encode("北京首都国际机场")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
         }
 
         // ==================== 停车场智能推荐 ====================
@@ -810,7 +854,6 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
                 ParkingRecommendationCard(
                     parking = parking,
                     onSelect = {
-                        // 选择停车场后开始导航
                         navController.navigate("navigation_map")
                     }
                 )
@@ -832,11 +875,72 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         // 导航按钮
         PrimaryButton(
             text = "开始导航",
-            onClick = { navController.navigate("navigation_map") },
+            onClick = { 
+                val encodedDest = Uri.encode(destination)
+                navController.navigate("navigation_map?destination=$encodedDest") 
+            },
             enabled = destination.isNotBlank(),
             backgroundColor = CarGreen,
             icon = Icons.Rounded.Navigation
         )
+    }
+}
+
+// 客运快捷目的地项
+@Composable
+private fun CarQuickDestinationItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(CarGreenLight, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = CarGreen,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
@@ -985,38 +1089,546 @@ private fun ParkingRecommendationCard(
 }
 
 // ==================== 道路实况页面 ====================
+
+// 路段数据模型
+data class RoadSegment(
+    val id: String,
+    val name: String,
+    val distance: String,
+    val estimatedTime: String,
+    val congestionLevel: RoadCongestionLevel,
+    val description: String,
+    val avgSpeed: String
+)
+
+// 拥堵等级枚举
+enum class RoadCongestionLevel(val label: String, val color: Color, val textColor: Color) {
+    FREE("畅通", CongestionFree, CongestionFree),
+    LIGHT("缓行", CongestionLight, Color(0xFFB8860B)),
+    MODERATE("拥堵", CongestionModerate, CongestionModerate),
+    SEVERE("严重", CongestionSevere, CongestionSevere)
+}
+
 @Composable
 fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "道路实况", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth().height(300.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(imageVector = Icons.Rounded.Map, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = "地图加载中...", color = TextSecondary)
+    // 状态管理
+    var isRefreshing by remember { mutableStateOf(false) }
+    var lastUpdateTime by remember { mutableStateOf("刚刚更新") }
+    var selectedSegment by remember { mutableStateOf<RoadSegment?>(null) }
+    var showDetailDialog by remember { mutableStateOf(false) }
+    var aMapInstance by remember { mutableStateOf<AMap?>(null) }
+    var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
+    
+    // 模拟路段数据（后端接入后替换为真实数据）
+    val roadSegments = remember {
+        listOf(
+            RoadSegment("1", "机场高速-主干道", "5.2km", "约8分钟", RoadCongestionLevel.FREE, "道路通畅，建议正常行驶", "65km/h"),
+            RoadSegment("2", "T1航站楼连接线", "1.8km", "约5分钟", RoadCongestionLevel.LIGHT, "车流量略大，注意保持车距", "35km/h"),
+            RoadSegment("3", "T2航站楼环路", "2.3km", "约12分钟", RoadCongestionLevel.MODERATE, "出发层车辆较多，建议绕行到达层", "18km/h"),
+            RoadSegment("4", "高铁站进站口", "0.8km", "约6分钟", RoadCongestionLevel.SEVERE, "大量旅客进站，车辆缓慢通行", "8km/h"),
+            RoadSegment("5", "P1停车场入口", "0.5km", "约2分钟", RoadCongestionLevel.FREE, "停车位充足，可快速进入", "25km/h"),
+            RoadSegment("6", "货运专用通道", "3.2km", "约6分钟", RoadCongestionLevel.LIGHT, "货车较多，小车注意避让", "40km/h"),
+            RoadSegment("7", "城市快速路匝道", "1.5km", "约8分钟", RoadCongestionLevel.MODERATE, "匝道汇入口拥堵，请提前变道", "22km/h")
+        )
+    }
+    
+    // 刷新数据
+    val scope = rememberCoroutineScope()
+    fun refreshData() {
+        scope.launch {
+            isRefreshing = true
+            delay(1500) // 模拟网络请求
+            lastUpdateTime = "刚刚更新"
+            isRefreshing = false
+        }
+    }
+    
+    // 定位到当前位置
+    fun locateToCurrentPosition() {
+        currentLocation?.let { location ->
+            aMapInstance?.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(location.latitude, location.longitude),
+                    16f
+                )
+            )
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            // 自定义顶部栏
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 返回按钮
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "返回",
+                            tint = TextPrimary
+                        )
+                    }
+                    
+                    // 标题
+                    Text(
+                        text = "道路实况",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    // 刷新按钮
+                    IconButton(
+                        onClick = { refreshData() },
+                        enabled = !isRefreshing
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = CarGreen,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "刷新",
+                                tint = CarGreen
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        containerColor = BackgroundPrimary
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // 地图区域
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                ) {
+                    // 高德地图
+                    AMapView(
+                        modifier = Modifier.fillMaxSize(),
+                        showTraffic = true,
+                        showMyLocation = true,
+                        onMapReady = { map ->
+                            aMapInstance = map
+                        },
+                        onLocationChanged = { location ->
+                            currentLocation = location
+                            // 首次定位移动到当前位置
+                            if (currentLocation == null) {
+                                aMapInstance?.animateCamera(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        LatLng(location.latitude, location.longitude),
+                                        15f
+                                    )
+                                )
+                            }
+                        }
+                    )
+                    
+                    // 定位按钮
+                    FloatingActionButton(
+                        onClick = { locateToCurrentPosition() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                            .size(44.dp),
+                        containerColor = Color.White,
+                        contentColor = CarGreen,
+                        elevation = FloatingActionButtonDefaults.elevation(
+                            defaultElevation = 4.dp,
+                            pressedElevation = 8.dp
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MyLocation,
+                            contentDescription = "定位",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    
+                    // 更新时间标签
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(12.dp),
+                        color = Color.White.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = 2.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AccessTime,
+                                contentDescription = null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = lastUpdateTime,
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+                
+                // 路况图例
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        CarTrafficLegendItem(color = CongestionFree, label = "畅通")
+                        CarTrafficLegendItem(color = CongestionLight, label = "缓行")
+                        CarTrafficLegendItem(color = CongestionModerate, label = "拥堵")
+                        CarTrafficLegendItem(color = CongestionSevere, label = "严重")
+                    }
+                }
+                
+                // 路段列表标题
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "周边路段",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "共${roadSegments.size}条路段",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                }
+                
+                // 路段列表
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(roadSegments) { segment ->
+                        RoadSegmentCard(
+                            segment = segment,
+                            onClick = {
+                                selectedSegment = segment
+                                showDetailDialog = true
+                            }
+                        )
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(text = "路况图例", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            CarTrafficLegendItem(color = CongestionFree, label = "畅通")
-            CarTrafficLegendItem(color = CongestionLight, label = "缓行")
-            CarTrafficLegendItem(color = CongestionModerate, label = "拥堵")
-            CarTrafficLegendItem(color = CongestionSevere, label = "严重")
+    }
+    
+    // 路段详情弹窗
+    if (showDetailDialog && selectedSegment != null) {
+        RoadSegmentDetailDialog(
+            segment = selectedSegment!!,
+            onDismiss = { showDetailDialog = false },
+            onNavigate = { segment ->
+                // 跳转到导航页面，传入目的地名称
+                val encodedDest = Uri.encode(segment.name)
+                navController.navigate("navigation_map?destination=$encodedDest")
+                showDetailDialog = false
+            }
+        )
+    }
+}
+
+// 路段卡片组件
+@Composable
+private fun RoadSegmentCard(
+    segment: RoadSegment,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 拥堵等级指示器
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(48.dp)
+                    .background(
+                        color = segment.congestionLevel.color,
+                        shape = RoundedCornerShape(2.dp)
+                    )
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // 路段信息
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = segment.name,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Route,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = segment.distance,
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = segment.estimatedTime,
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+            
+            // 拥堵状态标签
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = segment.congestionLevel.color.copy(alpha = 0.15f)
+            ) {
+                Text(
+                    text = segment.congestionLevel.label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = segment.congestionLevel.textColor,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            // 箭头指示
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = "查看详情",
+                tint = TextTertiary
+            )
         }
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(text = "客运服务点", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-        Spacer(modifier = Modifier.height(12.dp))
-        listOf("T1航站楼" to "人流量适中", "T2航站楼" to "人流量较大", "高铁站" to "人流量正常").forEach { (name, status) ->
-            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = name, fontSize = 15.sp, color = TextPrimary)
-                    Text(text = status, fontSize = 13.sp, color = CarGreen)
+    }
+}
+
+// 路段详情弹窗
+@Composable
+private fun RoadSegmentDetailDialog(
+    segment: RoadSegment,
+    onDismiss: () -> Unit,
+    onNavigate: (RoadSegment) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp)
+            ) {
+                // 标题栏
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "路段详情",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "关闭",
+                            tint = TextSecondary
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 路段名称和状态
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(
+                                color = segment.congestionLevel.color,
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = segment.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 详情信息
+                DetailInfoRow(label = "当前状态", value = segment.congestionLevel.label, valueColor = segment.congestionLevel.textColor)
+                DetailInfoRow(label = "路段长度", value = segment.distance)
+                DetailInfoRow(label = "预计用时", value = segment.estimatedTime)
+                DetailInfoRow(label = "平均车速", value = segment.avgSpeed)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // 路况描述
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = BackgroundPrimary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = CarGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = segment.description,
+                            fontSize = 14.sp,
+                            color = TextSecondary,
+                            lineHeight = 20.sp
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                // 导航按钮
+                Button(
+                    onClick = { onNavigate(segment) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = CarGreen),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Navigation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "开始导航",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
+    }
+}
+
+// 详情信息行
+@Composable
+private fun DetailInfoRow(
+    label: String,
+    value: String,
+    valueColor: Color = TextPrimary
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = TextSecondary
+        )
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = valueColor
+        )
     }
 }
 
@@ -1597,96 +2209,22 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // 开始共享位置按钮
-                var isSharing by remember { mutableStateOf(false) }
-                var shareLink by remember { mutableStateOf("") }
-                
-                if (!isSharing) {
-                    Button(
-                        onClick = { 
-                            isSharing = true
-                            shareLink = "https://share.smartlogistics.com/location/${System.currentTimeMillis()}"
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Brush.linearGradient(
-                                colors = listOf(Color(0xFF667EEA), Color(0xFF764BA2))
-                            ).let { Color(0xFF667EEA) }
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Share,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "开始共享位置", fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                } else {
-                    // 正在共享状态
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF667EEA).copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(Color(0xFF22C55E), CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "正在共享位置...",
-                                fontSize = 14.sp,
-                                color = Color(0xFF667EEA),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // 复制链接按钮
-                            OutlinedButton(
-                                onClick = { /* TODO: 复制到剪贴板 */ },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, Color(0xFF667EEA))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Link,
-                                    contentDescription = null,
-                                    tint = Color(0xFF667EEA),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = "复制链接", fontSize = 14.sp, color = Color(0xFF667EEA))
-                            }
-                            
-                            // 停止共享按钮
-                            Button(
-                                onClick = { isSharing = false },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Stop,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = "停止共享", fontSize = 14.sp)
-                            }
-                        }
-                    }
+                // 开始共享位置按钮 - 跳转到位置共享页面
+                Button(
+                    onClick = { navController.navigate("location_share") },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF667EEA)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "开始共享位置", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }

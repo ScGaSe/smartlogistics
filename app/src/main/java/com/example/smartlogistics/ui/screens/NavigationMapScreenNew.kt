@@ -177,6 +177,95 @@ fun NavigationMapScreenNew(
         }
     }
 
+    // ==================== 自动搜索：如果有初始目的地，自动触发搜索并规划路线 ====================
+    var hasAutoSearched by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(initialDestination, currentLocation, aMap) {
+        if (initialDestination.isNotBlank() && !hasAutoSearched && currentLocation != null && aMap != null) {
+            hasAutoSearched = true
+            isSearching = true
+            searchPoi(context, initialDestination) { results ->
+                isSearching = false
+                searchResults = results
+                
+                if (results.isNotEmpty()) {
+                    // 自动选择第一个结果
+                    val firstPoi = results.first()
+                    selectedPoi = firstPoi
+                    searchQuery = firstPoi.title
+                    showSearchResults = false
+                    
+                    // 在地图上添加标记
+                    aMap?.let { map ->
+                        clearOverlays(currentMarkers, currentPolylines)
+                        val marker = map.addMarker(
+                            MarkerOptions()
+                                .position(LatLng(firstPoi.latLonPoint.latitude, firstPoi.latLonPoint.longitude))
+                                .title(firstPoi.title)
+                                .snippet(firstPoi.snippet)
+                                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                        )
+                        currentMarkers = listOf(marker)
+                        map.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(firstPoi.latLonPoint.latitude, firstPoi.latLonPoint.longitude),
+                                15f
+                            )
+                        )
+                    }
+                    
+                    // 自动规划路线
+                    isLoadingRoute = true
+                    searchDriveRoute(
+                        context = context,
+                        start = LatLonPoint(currentLocation!!.latitude, currentLocation!!.longitude),
+                        end = firstPoi.latLonPoint
+                    ) { paths ->
+                        isLoadingRoute = false
+                        if (paths.isNotEmpty()) {
+                            routePaths = paths
+                            selectedRouteIndex = 0
+                            showRouteInfo = true
+                            
+                            // 绘制所有路线
+                            aMap?.let { map ->
+                                clearOverlays(currentMarkers, currentPolylines)
+                                currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
+                                
+                                // 添加起终点标记
+                                val startMarker = map.addMarker(
+                                    MarkerOptions()
+                                        .position(currentLocation)
+                                        .title("起点")
+                                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
+                                )
+                                val endMarker = map.addMarker(
+                                    MarkerOptions()
+                                        .position(LatLng(firstPoi.latLonPoint.latitude, firstPoi.latLonPoint.longitude))
+                                        .title(firstPoi.title)
+                                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                                )
+                                currentMarkers = listOf(startMarker, endMarker)
+                                
+                                // 缩放到显示整条路线
+                                zoomToRoute(map, paths[0])
+                            }
+                            
+                            if (paths.size > 1) {
+                                Toast.makeText(context, "找到 ${paths.size} 条路线", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "路线规划失败，请手动搜索", Toast.LENGTH_SHORT).show()
+                            showSearchResults = true
+                        }
+                    }
+                } else {
+                    Toast.makeText(context, "未找到目的地，请手动搜索", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ==================== 地图 ====================
         AndroidView(

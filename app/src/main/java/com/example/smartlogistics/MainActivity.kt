@@ -101,12 +101,10 @@ fun MainAppEntry(viewModel: MainViewModel) {
     )
 
     // 显示底部导航栏的页面
-    val showBottomBar = currentRoute in listOf(
-        "truck_home",
-        "car_home",
-        "navigation_map",
-        "user_profile"
-    )
+    val showBottomBar = currentRoute?.startsWith("truck_home") == true ||
+            currentRoute?.startsWith("car_home") == true ||
+            currentRoute?.startsWith("navigation_map") == true ||
+            currentRoute?.startsWith("user_profile") == true
 
     // 根据当前模式决定主色
     val isProfessionalMode = currentRoute?.startsWith("truck") == true ||
@@ -131,7 +129,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                         val isSelected = if (item.name == "主页") {
                             currentRoute == "truck_home" || currentRoute == "car_home"
                         } else {
-                            currentRoute == item.route
+                            currentRoute?.startsWith(item.route) == true
                         }
 
                         NavigationBarItem(
@@ -296,12 +294,38 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-
-            // ==================== 公共模块 ====================
-            composable("navigation_map") {
-                NavigationMapScreenNew(
+            
+            // 位置共享页面
+            composable("location_share") {
+                LocationShareScreen(
                     navController = navController,
                     viewModel = viewModel
+                )
+            }
+
+            // ==================== 公共模块 ====================
+            // 导航页面 - 支持可选的目的地参数
+            composable(
+                route = "navigation_map?destination={destination}",
+                arguments = listOf(
+                    navArgument("destination") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    }
+                )
+            ) { backStackEntry ->
+                val destination = backStackEntry.arguments?.getString("destination") ?: ""
+                val decodedDest = if (destination.isNotBlank()) {
+                    try {
+                        android.net.Uri.decode(destination)
+                    } catch (e: Exception) {
+                        destination
+                    }
+                } else ""
+                NavigationMapScreenNew(
+                    navController = navController,
+                    viewModel = viewModel,
+                    initialDestination = decodedDest
                 )
             }
 

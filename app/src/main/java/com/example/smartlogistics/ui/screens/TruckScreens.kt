@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -31,12 +33,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
@@ -52,7 +56,13 @@ import generateMockCongestionData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.LatLng
+import com.amap.api.location.AMapLocation
 import kotlinx.coroutines.withContext
+import java.net.URLEncoder
 
 // ==================== 货运司机主页 ====================
 @Composable
@@ -202,6 +212,9 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<String?>(null) }
     val tfliteHelper = remember { TFLiteHelper(context) }
+    
+    // ========== 生命周期安全的协程作用域 ==========
+    val coroutineScope = rememberCoroutineScope()
 
     // =====================================================
     // 关键！！！所有 Launcher 必须在这里声明（DetailScreenTemplate 之前）
@@ -213,16 +226,23 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     ) { uri: Uri? ->
         uri?.let {
             isRecognizing = true
-            CoroutineScope(Dispatchers.IO).launch {
-                val bitmap = tfliteHelper.loadImageFromUri(it)
-                val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
-                withContext(Dispatchers.Main) {
-                    isRecognizing = false
-                    result?.let { plate ->
-                        plateNumber = plate
-                        recognitionResult = "识别成功: $plate"
-                    } ?: run {
-                        recognitionResult = "识别失败，请重试"
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val bitmap = tfliteHelper.loadImageFromUri(it)
+                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        result?.let { plate ->
+                            plateNumber = plate
+                            recognitionResult = "识别成功: $plate"
+                        } ?: run {
+                            recognitionResult = "识别失败，请重试"
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        recognitionResult = "识别出错: ${e.message}"
                     }
                 }
             }
@@ -235,12 +255,19 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     ) { bitmap: Bitmap? ->
         bitmap?.let {
             isRecognizing = true
-            CoroutineScope(Dispatchers.IO).launch {
-                val result = tfliteHelper.recognizePlate(it)
-                withContext(Dispatchers.Main) {
-                    isRecognizing = false
-                    plateNumber = result
-                    recognitionResult = "识别成功: $result"
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val result = tfliteHelper.recognizePlate(it)
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        plateNumber = result
+                        recognitionResult = "识别成功: $result"
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isRecognizing = false
+                        recognitionResult = "识别出错: ${e.message}"
+                    }
                 }
             }
         }
@@ -637,53 +664,779 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
 @Composable
 fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = null) {
     var destination by remember { mutableStateOf("") }
+    
     DetailScreenTemplate(navController = navController, title = "路线规划", backgroundColor = BackgroundPrimary) {
-        AiEntryCard(title = "语音导航", subtitle = "说出目的地，智能规划货车路线", primaryColor = TruckOrange, onClick = { navController.navigate("ai_chat") })
-        Spacer(modifier = Modifier.height(20.dp))
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        // 路线输入卡片
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(TruckOrange, CircleShape))
+                // 起点
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(TruckOrange, CircleShape)
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(text = "我的位置", fontSize = 15.sp, color = TextPrimary)
+                    Text(text = "我的位置", fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.weight(1f))
+                    // 定位刷新按钮
+                    Icon(
+                        imageVector = Icons.Rounded.MyLocation,
+                        contentDescription = "定位",
+                        tint = TruckOrange,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable { /* 刷新定位 */ }
+                    )
                 }
-                Box(modifier = Modifier.padding(start = 5.dp, top = 4.dp, bottom = 4.dp).width(2.dp).height(24.dp).background(BorderLight))
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(ErrorRed, CircleShape))
+                
+                // 连接线
+                Box(
+                    modifier = Modifier
+                        .padding(start = 5.dp, top = 8.dp, bottom = 8.dp)
+                        .width(2.dp)
+                        .height(20.dp)
+                        .background(BorderLight)
+                )
+                
+                // 终点输入
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(ErrorRed, CircleShape)
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
-                    OutlinedTextField(value = destination, onValueChange = { destination = it }, placeholder = { Text("输入仓库、货站名称", color = TextTertiary) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = TruckOrange, unfocusedBorderColor = BorderLight), singleLine = true)
+                    OutlinedTextField(
+                        value = destination,
+                        onValueChange = { destination = it },
+                        placeholder = { Text("输入仓库、货站名称", color = TextTertiary) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TruckOrange,
+                            unfocusedBorderColor = BorderLight
+                        ),
+                        singleLine = true,
+                        trailingIcon = {
+                            // 语音输入按钮
+                            IconButton(
+                                onClick = { navController.navigate("ai_chat") }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mic,
+                                    contentDescription = "语音输入",
+                                    tint = TruckOrange,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    )
                 }
             }
         }
+        
         Spacer(modifier = Modifier.height(20.dp))
-        TipCard(text = "系统将自动避开限高、限重路段，并考虑危化品车辆通行限制。", icon = Icons.Rounded.Info, backgroundColor = TruckOrangeLight, iconColor = TruckOrange)
+        
+        // 常用目的地
+        Text(
+            text = "常用目的地",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // 常用目的地列表
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            TruckQuickDestinationItem(
+                icon = Icons.Rounded.Warehouse,
+                title = "1号仓库",
+                subtitle = "北京市朝阳区物流园区",
+                onClick = { 
+                    val encodedDest = Uri.encode("北京市朝阳区物流园区 1号仓库")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
+            TruckQuickDestinationItem(
+                icon = Icons.Rounded.LocalShipping,
+                title = "3号货站",
+                subtitle = "北京市大兴区货运中心",
+                onClick = { 
+                    val encodedDest = Uri.encode("北京市大兴区货运中心 3号货站")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
+            TruckQuickDestinationItem(
+                icon = Icons.Rounded.Factory,
+                title = "集装箱堆场",
+                subtitle = "天津港保税区",
+                onClick = { 
+                    val encodedDest = Uri.encode("天津港保税区 集装箱堆场")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(20.dp))
+        
+        // 提示卡片
+        TipCard(
+            text = "系统将自动避开限高、限重路段，并考虑危化品车辆通行限制。",
+            icon = Icons.Rounded.Info,
+            backgroundColor = TruckOrangeLight,
+            iconColor = TruckOrange
+        )
+        
         Spacer(modifier = Modifier.height(24.dp))
-        PrimaryButton(text = "开始导航", onClick = { navController.navigate("navigation_map") }, enabled = destination.isNotBlank(), backgroundColor = TruckOrange, icon = Icons.Rounded.Navigation)
+        
+        // 开始导航按钮
+        PrimaryButton(
+            text = "开始导航",
+            onClick = { 
+                val encodedDest = Uri.encode(destination)
+                navController.navigate("navigation_map?destination=$encodedDest") 
+            },
+            enabled = destination.isNotBlank(),
+            backgroundColor = TruckOrange,
+            icon = Icons.Rounded.Navigation
+        )
+    }
+}
+
+// 货运快捷目的地项
+@Composable
+private fun TruckQuickDestinationItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(TruckOrangeLight, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = TruckOrange,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
 // ==================== 道路实况页面 ====================
+
+// 货车路段数据模型
+data class TruckRoadSegment(
+    val id: String,
+    val name: String,
+    val distance: String,
+    val estimatedTime: String,
+    val congestionLevel: TruckRoadCongestionLevel,
+    val description: String,
+    val avgSpeed: String,
+    val truckRestriction: String? = null // 货车限制信息
+)
+
+// 货车拥堵等级枚举
+enum class TruckRoadCongestionLevel(val label: String, val color: Color, val textColor: Color) {
+    FREE("畅通", CongestionFree, CongestionFree),
+    LIGHT("缓行", CongestionLight, Color(0xFFB8860B)),
+    MODERATE("拥堵", CongestionModerate, CongestionModerate),
+    SEVERE("严重", CongestionSevere, CongestionSevere)
+}
+
 @Composable
 fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    DetailScreenTemplate(navController = navController, title = "道路实况", backgroundColor = BackgroundPrimary) {
-        Card(modifier = Modifier.fillMaxWidth().height(300.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(imageVector = Icons.Rounded.Map, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = "地图加载中...", color = TextSecondary)
+    // 状态管理
+    var isRefreshing by remember { mutableStateOf(false) }
+    var lastUpdateTime by remember { mutableStateOf("刚刚更新") }
+    var selectedSegment by remember { mutableStateOf<TruckRoadSegment?>(null) }
+    var showDetailDialog by remember { mutableStateOf(false) }
+    var aMapInstance by remember { mutableStateOf<AMap?>(null) }
+    var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
+    
+    // 模拟货运路段数据（后端接入后替换为真实数据）
+    val roadSegments = remember {
+        listOf(
+            TruckRoadSegment("1", "北门闸口通道", "2.5km", "约6分钟", TruckRoadCongestionLevel.FREE, "道路通畅，货车可正常通行", "50km/h", "限高4.5米"),
+            TruckRoadSegment("2", "3号仓库入口", "1.2km", "约5分钟", TruckRoadCongestionLevel.LIGHT, "等待装卸货车较多，请耐心排队", "25km/h", "限载30吨"),
+            TruckRoadSegment("3", "危化品专用道", "3.8km", "约8分钟", TruckRoadCongestionLevel.FREE, "专用通道畅通，请持证通行", "45km/h", "需危化品通行证"),
+            TruckRoadSegment("4", "集装箱堆场通道", "1.5km", "约12分钟", TruckRoadCongestionLevel.SEVERE, "集卡排队严重，建议绕行南门", "10km/h", "仅限集装箱车辆"),
+            TruckRoadSegment("5", "南门出口通道", "2.0km", "约5分钟", TruckRoadCongestionLevel.LIGHT, "出场车辆较多，注意前方减速", "30km/h"),
+            TruckRoadSegment("6", "冷链物流通道", "1.8km", "约4分钟", TruckRoadCongestionLevel.FREE, "冷链专用道畅通", "40km/h", "冷链车辆优先"),
+            TruckRoadSegment("7", "园区环路主干道", "4.5km", "约10分钟", TruckRoadCongestionLevel.MODERATE, "高峰期车流量大，注意货车限速", "25km/h", "限速40km/h")
+        )
+    }
+    
+    // 刷新数据
+    val scope = rememberCoroutineScope()
+    fun refreshData() {
+        scope.launch {
+            isRefreshing = true
+            delay(1500) // 模拟网络请求
+            lastUpdateTime = "刚刚更新"
+            isRefreshing = false
+        }
+    }
+    
+    // 定位到当前位置
+    fun locateToCurrentPosition() {
+        currentLocation?.let { location ->
+            aMapInstance?.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(location.latitude, location.longitude),
+                    16f
+                )
+            )
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            // 自定义顶部栏
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 返回按钮
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "返回",
+                            tint = TextPrimary
+                        )
+                    }
+                    
+                    // 标题
+                    Text(
+                        text = "道路实况",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    // 刷新按钮
+                    IconButton(
+                        onClick = { refreshData() },
+                        enabled = !isRefreshing
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = TruckOrange,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "刷新",
+                                tint = TruckOrange
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        containerColor = BackgroundPrimary
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // 地图区域
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                ) {
+                    // 高德地图
+                    AMapView(
+                        modifier = Modifier.fillMaxSize(),
+                        showTraffic = true,
+                        showMyLocation = true,
+                        onMapReady = { map ->
+                            aMapInstance = map
+                        },
+                        onLocationChanged = { location ->
+                            currentLocation = location
+                            // 首次定位移动到当前位置
+                            if (currentLocation == null) {
+                                aMapInstance?.animateCamera(
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        LatLng(location.latitude, location.longitude),
+                                        15f
+                                    )
+                                )
+                            }
+                        }
+                    )
+                    
+                    // 定位按钮
+                    FloatingActionButton(
+                        onClick = { locateToCurrentPosition() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                            .size(44.dp),
+                        containerColor = Color.White,
+                        contentColor = TruckOrange,
+                        elevation = FloatingActionButtonDefaults.elevation(
+                            defaultElevation = 4.dp,
+                            pressedElevation = 8.dp
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MyLocation,
+                            contentDescription = "定位",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    
+                    // 更新时间标签
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(12.dp),
+                        color = Color.White.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = 2.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AccessTime,
+                                contentDescription = null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = lastUpdateTime,
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+                
+                // 路况图例
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        TruckTrafficLegendItem(color = CongestionFree, label = "畅通")
+                        TruckTrafficLegendItem(color = CongestionLight, label = "缓行")
+                        TruckTrafficLegendItem(color = CongestionModerate, label = "拥堵")
+                        TruckTrafficLegendItem(color = CongestionSevere, label = "严重")
+                    }
+                }
+                
+                // 路段列表标题
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "货运通道",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "共${roadSegments.size}条通道",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                }
+                
+                // 路段列表
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(roadSegments) { segment ->
+                        TruckRoadSegmentCard(
+                            segment = segment,
+                            onClick = {
+                                selectedSegment = segment
+                                showDetailDialog = true
+                            }
+                        )
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(text = "路况图例", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            TruckTrafficLegendItem(color = CongestionFree, label = "畅通")
-            TruckTrafficLegendItem(color = CongestionLight, label = "缓行")
-            TruckTrafficLegendItem(color = CongestionModerate, label = "拥堵")
-            TruckTrafficLegendItem(color = CongestionSevere, label = "严重")
+    }
+    
+    // 路段详情弹窗
+    if (showDetailDialog && selectedSegment != null) {
+        TruckRoadSegmentDetailDialog(
+            segment = selectedSegment!!,
+            onDismiss = { showDetailDialog = false },
+            onNavigate = { segment ->
+                // 跳转到导航页面，传入目的地名称
+                val encodedDest = Uri.encode(segment.name)
+                navController.navigate("navigation_map?destination=$encodedDest")
+                showDetailDialog = false
+            }
+        )
+    }
+}
+
+// 货车路段卡片组件
+@Composable
+private fun TruckRoadSegmentCard(
+    segment: TruckRoadSegment,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 拥堵等级指示器
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(48.dp)
+                    .background(
+                        color = segment.congestionLevel.color,
+                        shape = RoundedCornerShape(2.dp)
+                    )
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // 路段信息
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = segment.name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                    // 货车限制标签
+                    segment.truckRestriction?.let { restriction ->
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = TruckOrangeLight
+                        ) {
+                            Text(
+                                text = restriction,
+                                fontSize = 10.sp,
+                                color = TruckOrange,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Route,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = segment.distance,
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = segment.estimatedTime,
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+            
+            // 拥堵状态标签
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = segment.congestionLevel.color.copy(alpha = 0.15f)
+            ) {
+                Text(
+                    text = segment.congestionLevel.label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = segment.congestionLevel.textColor,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            // 箭头指示
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = "查看详情",
+                tint = TextTertiary
+            )
         }
+    }
+}
+
+// 货车路段详情弹窗
+@Composable
+private fun TruckRoadSegmentDetailDialog(
+    segment: TruckRoadSegment,
+    onDismiss: () -> Unit,
+    onNavigate: (TruckRoadSegment) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp)
+            ) {
+                // 标题栏
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "通道详情",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "关闭",
+                            tint = TextSecondary
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 路段名称和状态
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(
+                                color = segment.congestionLevel.color,
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = segment.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 详情信息
+                TruckDetailInfoRow(label = "当前状态", value = segment.congestionLevel.label, valueColor = segment.congestionLevel.textColor)
+                TruckDetailInfoRow(label = "通道长度", value = segment.distance)
+                TruckDetailInfoRow(label = "预计用时", value = segment.estimatedTime)
+                TruckDetailInfoRow(label = "平均车速", value = segment.avgSpeed)
+                segment.truckRestriction?.let {
+                    TruckDetailInfoRow(label = "通行限制", value = it, valueColor = TruckOrange)
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // 路况描述
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = BackgroundPrimary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = TruckOrange,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = segment.description,
+                            fontSize = 14.sp,
+                            color = TextSecondary,
+                            lineHeight = 20.sp
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                // 导航按钮
+                Button(
+                    onClick = { onNavigate(segment) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = TruckOrange),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Navigation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "开始导航",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+// 货车详情信息行
+@Composable
+private fun TruckDetailInfoRow(
+    label: String,
+    value: String,
+    valueColor: Color = TextPrimary
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = TextSecondary
+        )
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = valueColor
+        )
     }
 }
 
