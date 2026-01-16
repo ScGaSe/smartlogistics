@@ -3,6 +3,7 @@ package com.example.smartlogistics.ui.screens
 import CongestionDetailCard
 import TTITrendChart
 import TimeRangeSelector
+import android.content.Context
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.delay
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.offset
+import kotlinx.coroutines.delay
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.lazy.LazyRow
+import android.content.Intent
+import android.widget.Toast
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
@@ -53,7 +69,11 @@ import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.location.AMapLocation
+import com.amap.api.location.AMapLocationClient
+import com.amap.api.location.AMapLocationClientOption
+import com.example.smartlogistics.utils.ParkingManager
 import kotlinx.coroutines.delay
+import java.io.File
 
 // ==================== 私家车主主页 ====================
 @Composable
@@ -238,29 +258,179 @@ private fun StatusBadge(text: String, backgroundColor: Color, textColor: Color) 
     }
 }
 
-// ==================== 车辆绑定页面 ====================
+
+// ==================== 🚗 智能停车助手 ====================
+// ==================== 在 CarBindScreen 函数之前添加数据类 ====================
+
+data class ParkingRecord(
+    val id: Long = System.currentTimeMillis(),
+    val photoUri: Uri? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val address: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val type: String = "photo"  // "photo" 或 "location"
+)
+
+// 转换函数：ParkingRecord <-> ParkingRecordData
+private fun ParkingRecord.toData(): ParkingManager.ParkingRecordData {
+    return ParkingManager.ParkingRecordData(
+        id = id,
+        photoUriString = photoUri?.toString(),
+        latitude = latitude,
+        longitude = longitude,
+        address = address,
+        timestamp = timestamp,
+        type = type
+    )
+}
+
+private fun ParkingManager.ParkingRecordData.toRecord(): ParkingRecord {
+    return ParkingRecord(
+        id = id,
+        photoUri = photoUriString?.let { Uri.parse(it) },
+        latitude = latitude,
+        longitude = longitude,
+        address = address,
+        timestamp = timestamp,
+        type = type
+    )
+}
+
+// ==================== 替换整个 CarBindScreen 函数 ====================
+
 @Composable
 fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // ========== 持久化管理器 ==========
+    val parkingManager = remember { ParkingManager(context) }
+
+    // ========== 车辆绑定状态 ==========
     var plateNumber by remember { mutableStateOf("") }
     var vehicleType by remember { mutableStateOf("sedan") }
     val vehicleState by viewModel?.vehicleState?.collectAsState() ?: remember { mutableStateOf(VehicleState.Idle) }
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val isLoading = vehicleState is VehicleState.Loading
 
-    // 车牌识别相关状态
-    var showImagePicker by remember { mutableStateOf(false) }
-    var showCamera by remember { mutableStateOf(false) }
+    // ========== 车牌识别状态 ==========
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<String?>(null) }
-    
-    // 相机拍照的 Uri（重要！用于 FileProvider）
     var photoUri by remember { mutableStateOf<Uri?>(null) }
-
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val tfliteHelper = remember { TFLiteHelper(context) }
 
-    // 图片选择器
+    // ========== 🚗 智能停车助手状态 ==========
+    // ⭐ 从持久化存储加载数据
+    var parkingRecords by remember {
+        mutableStateOf(parkingManager.getRecords().map { it.toRecord() })
+    }
+    var parkingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var findCarPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var isParkingUploading by remember { mutableStateOf(false) }
+    var isGettingLocation by remember { mutableStateOf(false) }
+    var isFindingCar by remember { mutableStateOf(false) }
+
+    // 高德定位客户端
+    var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
+
+    // 弹窗状态
+    var showPhotoDetailDialog by remember { mutableStateOf(false) }
+    var showLocationDetailDialog by remember { mutableStateOf(false) }
+    var showFindCarResultDialog by remember { mutableStateOf(false) }
+    var selectedRecord by remember { mutableStateOf<ParkingRecord?>(null) }
+    var findCarResult by remember { mutableStateOf<String?>(null) }
+
+    // 计算是否有可用记录
+    val hasLocationRecord = parkingRecords.any { it.latitude != null && it.longitude != null }
+    val hasPhotoRecord = parkingRecords.any { it.photoUri != null }
+    val latestLocationRecord = parkingRecords.firstOrNull { it.latitude != null }
+
+    // =====================================================
+    // ⭐ 保存数据的辅助函数
+    // =====================================================
+
+    fun saveRecordsToStorage(records: List<ParkingRecord>) {
+        parkingManager.saveRecords(records.map { it.toData() })
+    }
+
+    fun addRecordAndSave(record: ParkingRecord) {
+        parkingRecords = listOf(record) + parkingRecords
+        saveRecordsToStorage(parkingRecords)
+    }
+
+    fun deleteRecordAndSave(id: Long) {
+        parkingRecords = parkingRecords.filterNot { it.id == id }
+        saveRecordsToStorage(parkingRecords)
+    }
+
+    fun clearRecordsAndSave() {
+        parkingRecords = emptyList()
+        parkingManager.clearRecords()
+    }
+
+    // =====================================================
+    // 🌍 真实定位函数
+    // =====================================================
+
+    fun startRealLocation() {
+        try {
+            AMapLocationClient.updatePrivacyShow(context, true, true)
+            AMapLocationClient.updatePrivacyAgree(context, true)
+
+            val client = locationClient ?: AMapLocationClient(context)
+            locationClient = client
+
+            client.setLocationOption(AMapLocationClientOption().apply {
+                locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
+                isOnceLocation = true
+                isNeedAddress = true
+                isLocationCacheEnable = false
+                httpTimeOut = 20000
+            })
+
+            client.setLocationListener { location ->
+                if (location != null && location.errorCode == 0) {
+                    // ⭐ 尝试多个字段获取地址
+                    val address = when {
+                        !location.address.isNullOrBlank() -> location.address
+                        !location.poiName.isNullOrBlank() -> location.poiName
+                        !location.aoiName.isNullOrBlank() -> location.aoiName
+                        !location.street.isNullOrBlank() -> {
+                            "${location.district ?: ""}${location.street ?: ""}${location.streetNum ?: ""}"
+                        }
+                        !location.district.isNullOrBlank() -> location.district
+                        else -> "停车位置"
+                    }
+
+                    val record = ParkingRecord(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        address = address,
+                        type = "location"
+                    )
+                    addRecordAndSave(record)
+                    isGettingLocation = false
+                    Toast.makeText(context, "位置已标记", Toast.LENGTH_SHORT).show()
+                } else {
+                    isGettingLocation = false
+                    Toast.makeText(context, "定位失败: ${location?.errorInfo ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                }
+                client.stopLocation()
+            }
+
+            client.startLocation()
+        } catch (e: Exception) {
+            isGettingLocation = false
+            Toast.makeText(context, "定位出错: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // =====================================================
+    // Launcher 声明
+    // =====================================================
+
+    // 车牌识别 - 图片选择器
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -270,15 +440,12 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 try {
                     val bitmap = tfliteHelper.loadImageFromUri(it)
                     val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
-
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
                         result?.let { plate ->
                             plateNumber = plate
                             recognitionResult = "识别成功: $plate"
-                        } ?: run {
-                            recognitionResult = "识别失败，请重试"
-                        }
+                        } ?: run { recognitionResult = "识别失败，请重试" }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -290,7 +457,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
-    // 相机拍照 - 使用 TakePicture（需要传入 Uri）
+    // 车牌识别 - 相机
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
@@ -300,15 +467,12 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 try {
                     val bitmap = tfliteHelper.loadImageFromUri(photoUri!!)
                     val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
-
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
                         result?.let { plate ->
                             plateNumber = plate
                             recognitionResult = "识别成功: $plate"
-                        } ?: run {
-                            recognitionResult = "识别失败，请重试"
-                        }
+                        } ?: run { recognitionResult = "识别失败，请重试" }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -317,40 +481,154 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     }
                 }
             }
-        } else {
-            recognitionResult = "拍照取消或失败"
         }
     }
 
-    // 相机权限请求
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            // 权限已授予，创建 Uri 并启动相机
             photoUri = CameraUtils.createImageUri(context)
             photoUri?.let { cameraLauncher.launch(it) }
         } else {
-            recognitionResult = "需要相机权限才能拍照识别"
+            recognitionResult = "需要相机权限"
         }
     }
-    
-    // 启动相机的函数
+
+    // ⭐ 停车拍照（保存到持久化存储）
+    val parkingCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && parkingPhotoUri != null) {
+            val newRecord = ParkingRecord(
+                photoUri = parkingPhotoUri,
+                type = "photo"
+            )
+            addRecordAndSave(newRecord)  // ⭐ 保存到持久化存储
+            Toast.makeText(context, "照片已保存", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val parkingCameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            parkingPhotoUri = CameraUtils.createImageUri(context)
+            parkingPhotoUri?.let { parkingCameraLauncher.launch(it) }
+        } else {
+            Toast.makeText(context, "需要相机权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ⭐ 寻车拍照（图片匹配）
+    val findCarCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && findCarPhotoUri != null) {
+            isFindingCar = true
+            scope.launch {
+                delay(2000) // 模拟匹配
+                isFindingCar = false
+                findCarResult = "匹配成功！与您停车时的照片相似度较高，请查看停车记录确认位置"
+                showFindCarResultDialog = true
+            }
+        }
+    }
+
+    val findCarCameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            findCarPhotoUri = CameraUtils.createImageUri(context)
+            findCarPhotoUri?.let { findCarCameraLauncher.launch(it) }
+        } else {
+            Toast.makeText(context, "需要相机权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ⭐ 位置权限（真实定位）
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+        if (granted) {
+            startRealLocation()
+        } else {
+            isGettingLocation = false
+            Toast.makeText(context, "需要位置权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // =====================================================
+    // 辅助函数
+    // =====================================================
+
     fun launchCamera() {
         if (CameraUtils.hasCameraPermission(context)) {
-            // 已有权限，直接创建 Uri 并启动相机
             photoUri = CameraUtils.createImageUri(context)
-            photoUri?.let { 
-                cameraLauncher.launch(it) 
-            } ?: run {
-                recognitionResult = "无法创建图片文件"
-            }
+            photoUri?.let { cameraLauncher.launch(it) }
         } else {
-            // 请求权限
             cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
+    fun launchParkingCamera() {
+        if (CameraUtils.hasCameraPermission(context)) {
+            parkingPhotoUri = CameraUtils.createImageUri(context)
+            parkingPhotoUri?.let { parkingCameraLauncher.launch(it) }
+        } else {
+            parkingCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+
+    fun launchFindCarCamera() {
+        if (CameraUtils.hasCameraPermission(context)) {
+            findCarPhotoUri = CameraUtils.createImageUri(context)
+            findCarPhotoUri?.let { findCarCameraLauncher.launch(it) }
+        } else {
+            findCarCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+
+    // 🌍 请求真实定位
+    fun requestLocationAndMark() {
+        isGettingLocation = true
+
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasCoarseLocation = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFineLocation || hasCoarseLocation) {
+            startRealLocation()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    fun navigateToParking() {
+        latestLocationRecord?.let { record ->
+            if (record.latitude != null && record.longitude != null) {
+                // ⭐ 格式：DIRECT|地址|纬度|经度
+                val address = record.address?.takeIf { it.isNotBlank() } ?: "停车位置"
+                val destination = "DIRECT:::$address:::${record.latitude}:::${record.longitude}"
+                val encodedDest = android.net.Uri.encode(destination)
+                navController.navigate("navigation_map?destination=$encodedDest")
+            }
+        }
+    }
+
+    // 副作用
     LaunchedEffect(vehicleState) {
         if (vehicleState is VehicleState.BindSuccess) {
             plateNumber = ""
@@ -359,8 +637,20 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            tfliteHelper.close()
+            locationClient?.stopLocation()
+            locationClient?.onDestroy()
+        }
+    }
+
+    // =====================================================
+    // UI
+    // =====================================================
+
     DetailScreenTemplate(navController = navController, title = "车辆绑定", backgroundColor = BackgroundPrimary) {
-        // 过滤无效车辆数据
+        // 已绑定车辆列表
         val validVehicles = vehicles.filter {
             it.plateNumber.isNotBlank() && !it.plateNumber.contains("string", ignoreCase = true)
         }
@@ -389,127 +679,52 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
             Spacer(modifier = Modifier.height(24.dp))
         }
 
+        // 添加新车辆
         Text(text = "添加新车辆", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
 
         Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // AI识别按钮组
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // 拍照识别
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { launchCamera() },
+                        modifier = Modifier.weight(1f).clickable { launchCamera() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CameraAlt,
-                                contentDescription = null,
-                                tint = CarGreen,
-                                modifier = Modifier.size(24.dp)
-                            )
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "拍照识别",
-                                fontSize = 15.sp,
-                                color = CarGreen,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Text(text = "拍照识别", fontSize = 15.sp, color = CarGreen, fontWeight = FontWeight.Medium)
                         }
                     }
-
-                    // 相册选择
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { imagePickerLauncher.launch("image/*") },
+                        modifier = Modifier.weight(1f).clickable { imagePickerLauncher.launch("image/*") },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Photo,
-                                contentDescription = null,
-                                tint = CarGreen,
-                                modifier = Modifier.size(24.dp)
-                            )
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Icon(imageVector = Icons.Rounded.Photo, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "相册选择",
-                                fontSize = 15.sp,
-                                color = CarGreen,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Text(text = "相册选择", fontSize = 15.sp, color = CarGreen, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
 
-                // 识别状态显示
                 if (isRecognizing) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = CarGreen,
-                            strokeWidth = 2.dp
-                        )
+                    Row(modifier = Modifier.fillMaxWidth().background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = CarGreen, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "正在识别车牌...",
-                            fontSize = 13.sp,
-                            color = CarGreen
-                        )
+                        Text(text = "正在识别车牌...", fontSize = 13.sp, color = CarGreen)
                     }
                 }
 
-                // 识别结果显示
                 recognitionResult?.let { result ->
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = CarGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Row(modifier = Modifier.fillMaxWidth().background(CarGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Rounded.CheckCircle, contentDescription = null, tint = CarGreen, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = result,
-                            fontSize = 13.sp,
-                            color = CarGreen,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Text(text = result, fontSize = 13.sp, color = CarGreen, fontWeight = FontWeight.Medium)
                     }
                 }
 
@@ -527,12 +742,13 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 }
             }
         }
+
         Spacer(modifier = Modifier.height(24.dp))
         PrimaryButton(text = "绑定车辆", onClick = { viewModel?.bindVehicle(plateNumber, vehicleType) }, isLoading = isLoading, enabled = plateNumber.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Add)
 
-        // ==================== 寻车助手模块 (保持原样) ====================
+        // ==================== ⭐ 智能停车助手 ====================
         Spacer(modifier = Modifier.height(32.dp))
-        Text(text = "寻车助手", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+        Text(text = "智能停车助手", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
 
         Card(
@@ -541,57 +757,78 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(text = "记录停车位置", fontSize = 14.sp, color = TextSecondary)
+                // 记录停车位置
+                Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                 Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // 标记位置
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(80.dp)
-                            .clickable { /* TODO: 保存GPS位置 */ },
+                        modifier = Modifier.weight(1f).height(80.dp).clickable(enabled = !isGettingLocation) { requestLocationAndMark() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.LocationOn,
-                                contentDescription = null,
-                                tint = CarGreen,
-                                modifier = Modifier.size(28.dp)
-                            )
+                        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            if (isGettingLocation) {
+                                CircularProgressIndicator(modifier = Modifier.size(28.dp), color = CarGreen, strokeWidth = 3.dp)
+                            } else {
+                                Icon(imageVector = Icons.Rounded.LocationOn, contentDescription = null, tint = CarGreen, modifier = Modifier.size(28.dp))
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "标记位置", fontSize = 13.sp, color = CarGreen, fontWeight = FontWeight.Medium)
+                            Text(text = if (isGettingLocation) "定位中..." else "标记位置", fontSize = 13.sp, color = CarGreen, fontWeight = FontWeight.Medium)
                         }
                     }
 
+                    // 拍照记录
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(80.dp)
-                            .clickable { /* TODO: 打开相机拍照 */ },
+                        modifier = Modifier.weight(1f).height(80.dp).clickable { launchParkingCamera() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CarGreen.copy(alpha = 0.1f))
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CameraAlt,
-                                contentDescription = null,
-                                tint = CarGreen,
-                                modifier = Modifier.size(28.dp)
-                            )
+                        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(imageVector = Icons.Rounded.CameraAlt, contentDescription = null, tint = CarGreen, modifier = Modifier.size(28.dp))
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "拍照记录", fontSize = 13.sp, color = CarGreen, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                // ⭐ 停车记录历史（可点击查看详情）
+                if (parkingRecords.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "停车记录 (${parkingRecords.size})", fontSize = 13.sp, color = TextSecondary)
+                        TextButton(onClick = { clearRecordsAndSave() }) {  // ⭐ 清空时也清除存储
+                            Text(text = "清空", fontSize = 12.sp, color = ErrorRed)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(parkingRecords.size) { index ->
+                            val record = parkingRecords[index]
+                            ParkingRecordCard(
+                                record = record,
+                                context = context,
+                                onClick = {
+                                    selectedRecord = record
+                                    if (record.type == "photo") {
+                                        showPhotoDetailDialog = true
+                                    } else {
+                                        showLocationDetailDialog = true
+                                    }
+                                },
+                                onDelete = {
+                                    deleteRecordAndSave(record.id)  // ⭐ 删除时也更新存储
+                                }
+                            )
                         }
                     }
                 }
@@ -600,90 +837,376 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 HorizontalDivider(color = BorderLight)
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Text(text = "找车", fontSize = 14.sp, color = TextSecondary)
+                // 找车
+                Text(text = "找车", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                 Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // 导航找车
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(80.dp)
-                            .clickable { navController.navigate("navigation_map") },
+                        modifier = Modifier.weight(1f).height(80.dp).clickable(enabled = hasLocationRecord) { navigateToParking() },
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF3B82F6).copy(alpha = 0.1f))
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (hasLocationRecord) Color(0xFF3B82F6).copy(alpha = 0.1f) else Color.Gray.copy(alpha = 0.1f)
+                        )
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
+                        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Icon(
                                 imageVector = Icons.Rounded.Navigation,
                                 contentDescription = null,
-                                tint = Color(0xFF3B82F6),
+                                tint = if (hasLocationRecord) Color(0xFF3B82F6) else Color.Gray,
                                 modifier = Modifier.size(28.dp)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "导航找车", fontSize = 13.sp, color = Color(0xFF3B82F6), fontWeight = FontWeight.Medium)
+                            Text(text = "导航找车", fontSize = 13.sp, color = if (hasLocationRecord) Color(0xFF3B82F6) else Color.Gray, fontWeight = FontWeight.Medium)
+                            if (!hasLocationRecord) {
+                                Text(text = "请先标记位置", fontSize = 10.sp, color = Color.Gray)
+                            }
                         }
                     }
 
+                    // 图片匹配
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(80.dp)
-                            .clickable { /* TODO: 查看停车照片 */ },
+                        modifier = Modifier.weight(1f).height(80.dp).clickable(enabled = hasPhotoRecord && !isFindingCar) { launchFindCarCamera() },
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF3B82F6).copy(alpha = 0.1f))
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (hasPhotoRecord) Color(0xFF3B82F6).copy(alpha = 0.1f) else Color.Gray.copy(alpha = 0.1f)
+                        )
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Photo,
-                                contentDescription = null,
-                                tint = Color(0xFF3B82F6),
-                                modifier = Modifier.size(28.dp)
-                            )
+                        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            if (isFindingCar) {
+                                CircularProgressIndicator(modifier = Modifier.size(28.dp), color = Color(0xFF3B82F6), strokeWidth = 3.dp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                    tint = if (hasPhotoRecord) Color(0xFF3B82F6) else Color.Gray,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "查看照片", fontSize = 13.sp, color = Color(0xFF3B82F6), fontWeight = FontWeight.Medium)
+                            Text(text = if (isFindingCar) "匹配中..." else "图片匹配", fontSize = 13.sp, color = if (hasPhotoRecord) Color(0xFF3B82F6) else Color.Gray, fontWeight = FontWeight.Medium)
+                            if (!hasPhotoRecord && !isFindingCar) {
+                                Text(text = "请先拍照记录", fontSize = 10.sp, color = Color.Gray)
+                            }
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(BackgroundSecondary, RoundedCornerShape(8.dp))
-                        .padding(12.dp),
+                    modifier = Modifier.fillMaxWidth().background(BackgroundSecondary, RoundedCornerShape(8.dp)).padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Info,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Icon(imageVector = Icons.Rounded.Info, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "停车后记录位置,方便您快速找到爱车",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
+                    Text(text = "停车记录会自动保存，退出后仍可查看", fontSize = 12.sp, color = TextSecondary)
                 }
             }
         }
     }
 
-    // 清理资源
-    DisposableEffect(Unit) {
-        onDispose {
-            tfliteHelper.close()
+    // ==================== 📷 照片详情弹窗 ====================
+    if (showPhotoDetailDialog && selectedRecord != null) {
+        Dialog(onDismissRequest = { showPhotoDetailDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "停车照片", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        IconButton(onClick = { showPhotoDetailDialog = false }) {
+                            Icon(imageVector = Icons.Rounded.Close, contentDescription = "关闭", tint = TextSecondary)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    selectedRecord?.photoUri?.let { uri ->
+                        val bitmap = remember(uri) {
+                            try {
+                                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                                    BitmapFactory.decodeStream(inputStream)
+                                }
+                            } catch (e: Exception) { null }
+                        }
+
+                        bitmap?.let { bmp ->
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "停车照片",
+                                modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } ?: Box(
+                            modifier = Modifier.fillMaxWidth().height(300.dp).background(Color.LightGray, RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) { Text("无法加载图片", color = TextSecondary) }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Rounded.Schedule, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "拍摄时间: ${dateFormat.format(java.util.Date(selectedRecord?.timestamp ?: 0))}", fontSize = 14.sp, color = TextSecondary)
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            selectedRecord?.let { deleteRecordAndSave(it.id) }
+                            showPhotoDetailDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(imageVector = Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("删除此记录")
+                    }
+                }
+            }
+        }
+    }
+
+    // ==================== 📍 位置详情弹窗 ====================
+    if (showLocationDetailDialog && selectedRecord != null) {
+        Dialog(onDismissRequest = { showLocationDetailDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "停车位置", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        IconButton(onClick = { showLocationDetailDialog = false }) {
+                            Icon(imageVector = Icons.Rounded.Close, contentDescription = "关闭", tint = TextSecondary)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(120.dp).background(Color(0xFF3B82F6).copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(imageVector = Icons.Rounded.LocationOn, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = "GPS已标记", fontSize = 14.sp, color = Color(0xFF3B82F6), fontWeight = FontWeight.Medium)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Rounded.Place, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = "地址", fontSize = 12.sp, color = TextSecondary)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = selectedRecord?.address ?: "未知地址", fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(imageVector = Icons.Rounded.MyLocation, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = "坐标", fontSize = 12.sp, color = TextSecondary)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${String.format("%.6f", selectedRecord?.latitude)}, ${String.format("%.6f", selectedRecord?.longitude)}",
+                                fontSize = 14.sp,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Rounded.Schedule, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "标记时间: ${dateFormat.format(java.util.Date(selectedRecord?.timestamp ?: 0))}", fontSize = 14.sp, color = TextSecondary)
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                selectedRecord?.let { deleteRecordAndSave(it.id) }
+                                showLocationDetailDialog = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("删除") }
+                        Button(
+                            onClick = {
+                                showLocationDetailDialog = false
+                                navigateToParking()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("导航前往") }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==================== 🔍 图片匹配结果弹窗 ====================
+    if (showFindCarResultDialog) {
+        Dialog(onDismissRequest = { showFindCarResultDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.size(64.dp).background(Color(0xFF3B82F6).copy(alpha = 0.1f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(imageVector = Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(40.dp))
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = "匹配成功！", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = findCarResult ?: "", fontSize = 14.sp, color = TextSecondary, textAlign = TextAlign.Center)
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { showFindCarResultDialog = false },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text(text = "关闭", color = TextSecondary) }
+                        if (hasLocationRecord) {
+                            Button(
+                                onClick = {
+                                    showFindCarResultDialog = false
+                                    navigateToParking()
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text(text = "导航前往") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== 📦 停车记录卡片组件 ====================
+@Composable
+private fun ParkingRecordCard(
+    record: ParkingRecord,
+    context: Context,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dateFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+
+    Card(
+        modifier = Modifier.width(90.dp).clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+    ) {
+        Box {
+            Column(
+                modifier = Modifier.padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier.size(70.dp).clip(RoundedCornerShape(8.dp)).background(Color.LightGray),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (record.photoUri != null) {
+                        val bitmap = remember(record.photoUri) {
+                            try {
+                                context.contentResolver.openInputStream(record.photoUri)?.use { inputStream ->
+                                    val options = BitmapFactory.Options().apply { inSampleSize = 4 }
+                                    BitmapFactory.decodeStream(inputStream, null, options)
+                                }
+                            } catch (e: Exception) { null }
+                        }
+
+                        bitmap?.let { bmp ->
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "停车照片",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } ?: Icon(imageVector = Icons.Rounded.Photo, contentDescription = null, tint = CarGreen, modifier = Modifier.size(32.dp))
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Color(0xFF3B82F6).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(imageVector = Icons.Rounded.LocationOn, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(32.dp))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = if (record.type == "photo") "📷 照片" else "📍 位置",
+                    fontSize = 11.sp,
+                    color = if (record.type == "photo") CarGreen else Color(0xFF3B82F6),
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = dateFormat.format(java.util.Date(record.timestamp)),
+                    fontSize = 10.sp,
+                    color = TextSecondary
+                )
+            }
+
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.align(Alignment.TopEnd).size(20.dp)
+            ) {
+                Box(
+                    modifier = Modifier.size(16.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(imageVector = Icons.Rounded.Close, contentDescription = "删除", tint = Color.White, modifier = Modifier.size(10.dp))
+                }
+            }
         }
     }
 }

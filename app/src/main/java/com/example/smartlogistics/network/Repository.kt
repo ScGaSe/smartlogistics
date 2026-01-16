@@ -5,6 +5,7 @@ import android.net.Uri
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 
 /**
@@ -346,6 +347,43 @@ class Repository(private val context: Context) {
     suspend fun getParkingPrediction(arrivalTime: String): NetworkResult<List<ParkingPrediction>> {
         // TODO: 实现停车预测API调用
         return NetworkResult.Success(emptyList())
+    }
+
+    // ==================== 智能停车助手 ====================
+
+    suspend fun registerParkingPhoto(imageFile: File, floor: String? = null, zone: String? = null): NetworkResult<ParkingRegisterResponse> {
+        return try {
+            val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
+            val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
+
+            val floorPart = floor?.toRequestBody("text/plain".toMediaTypeOrNull())
+            val zonePart = zone?.toRequestBody("text/plain".toMediaTypeOrNull())
+
+            val response = api.registerParking(body, floorPart, zonePart)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("停车记录失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
+    suspend fun findParkingByPhoto(imageFile: File): NetworkResult<ParkingFindResponse> {
+        return try {
+            val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
+            val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
+
+            val response = api.findParking(body)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("寻车失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
     }
 }
 

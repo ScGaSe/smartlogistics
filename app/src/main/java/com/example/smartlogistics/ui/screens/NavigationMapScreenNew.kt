@@ -94,7 +94,13 @@ fun NavigationMapScreenNew(
     var searchResults by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
     var showSearchResults by remember { mutableStateOf(false) }
     var selectedPoi by remember { mutableStateOf<PoiItem?>(null) }
-    
+    // ⭐ 直接目的地（用于停车助手等直接传坐标的场景）
+    var directDestinationName by remember { mutableStateOf<String?>(null) }
+    var directDestinationLatLng by remember { mutableStateOf<LatLng?>(null) }
+    var hasTriedDirectRoute by remember { mutableStateOf(false) }  // ⭐ 防止重复触发
+
+    var pendingDestination by remember { mutableStateOf<Triple<String, Double, Double>?>(null) }
+
     // 路线相关
     var routePaths by remember { mutableStateOf<List<DrivePath>>(emptyList()) }
     var selectedRouteIndex by remember { mutableStateOf(0) }
@@ -177,25 +183,126 @@ fun NavigationMapScreenNew(
         }
     }
 
-    // ==================== 自动搜索：如果有初始目的地，自动触发搜索并规划路线 ====================
+    // ==================== 自动处理初始目的地 ====================
     var hasAutoSearched by remember { mutableStateOf(false) }
-    
+
+    // 解析 DIRECT| 格式的目的地
+    LaunchedEffect(initialDestination, aMap) {
+        if (initialDestination.isNotBlank() && !hasAutoSearched && aMap != null) {
+
+            if (initialDestination.startsWith("DIRECT:::")) {
+                val parts = initialDestination.split(":::")
+                if (parts.size >= 4) {
+                    val destName = parts[1]
+                    val lat = parts[2].toDoubleOrNull()
+                    val lng = parts[3].toDoubleOrNull()
+
+                    if (lat != null && lng != null) {
+                        hasAutoSearched = true
+                        directDestinationName = destName
+                        directDestinationLatLng = LatLng(lat, lng)
+                        searchQuery = destName
+
+                        // 添加终点标记
+                        aMap?.let { map ->
+                            clearOverlays(currentMarkers, currentPolylines)
+                            val marker = map.addMarker(
+                                MarkerOptions()
+                                    .position(LatLng(lat, lng))
+                                    .title(destName)
+                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                            )
+                            currentMarkers = listOf(marker)
+                            map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), 15f))
+                        }
+
+                        android.util.Log.d("NAV_DEBUG", "解析目的地: $destName ($lat, $lng)")
+                        return@LaunchedEffect
+                    }
+                }
+            }
+
+            // 普通地址走原来的POI搜索逻辑...
+        }
+    }
+
+    // ⭐ 等待定位完成后规划路线（只尝试一次）
+    LaunchedEffect(currentLocation, directDestinationLatLng, hasTriedDirectRoute) {
+        val destLatLng = directDestinationLatLng
+        val destName = directDestinationName
+
+        if (currentLocation != null &&
+            destLatLng != null &&
+            destName != null &&
+            !hasTriedDirectRoute &&
+            !isLoadingRoute) {
+
+            hasTriedDirectRoute = true
+            isLoadingRoute = true
+
+            android.util.Log.d("NAV_DEBUG", "开始规划路线:")
+            android.util.Log.d("NAV_DEBUG", "  起点: ${currentLocation!!.latitude}, ${currentLocation!!.longitude}")
+            android.util.Log.d("NAV_DEBUG", "  终点: ${destLatLng.latitude}, ${destLatLng.longitude}")
+
+            searchDriveRoute(
+                context = context,
+                start = LatLonPoint(currentLocation!!.latitude, currentLocation!!.longitude),
+                end = LatLonPoint(destLatLng.latitude, destLatLng.longitude)
+            ) { paths ->
+                isLoadingRoute = false
+
+                if (paths.isNotEmpty()) {
+                    routePaths = paths
+                    selectedRouteIndex = 0
+                    showRouteInfo = true
+
+                    aMap?.let { map ->
+                        clearOverlays(currentMarkers, currentPolylines)
+                        currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
+
+                        val startMarker = map.addMarker(
+                            MarkerOptions()
+                                .position(currentLocation)
+                                .title("起点")
+                                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
+                        )
+                        val endMarker = map.addMarker(
+                            MarkerOptions()
+                                .position(destLatLng)
+                                .title(destName)
+                                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                        )
+                        currentMarkers = listOf(startMarker, endMarker)
+                        zoomToRoute(map, paths[0])
+                    }
+                } else {
+                    Toast.makeText(context, "路线规划失败，请手动搜索目的地", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // 原有的POI搜索逻辑
     LaunchedEffect(initialDestination, currentLocation, aMap) {
-        if (initialDestination.isNotBlank() && !hasAutoSearched && currentLocation != null && aMap != null) {
+        // 只处理普通地址（不带DIRECT|前缀）
+        if (initialDestination.isNotBlank() &&
+            !initialDestination.startsWith("DIRECT:::") &&
+            !hasAutoSearched &&
+            currentLocation != null &&
+            aMap != null) {
+
             hasAutoSearched = true
             isSearching = true
             searchPoi(context, initialDestination) { results ->
                 isSearching = false
                 searchResults = results
-                
+
                 if (results.isNotEmpty()) {
-                    // 自动选择第一个结果
                     val firstPoi = results.first()
                     selectedPoi = firstPoi
                     searchQuery = firstPoi.title
                     showSearchResults = false
-                    
-                    // 在地图上添加标记
+
                     aMap?.let { map ->
                         clearOverlays(currentMarkers, currentPolylines)
                         val marker = map.addMarker(
@@ -213,8 +320,7 @@ fun NavigationMapScreenNew(
                             )
                         )
                     }
-                    
-                    // 自动规划路线
+
                     isLoadingRoute = true
                     searchDriveRoute(
                         context = context,
@@ -226,13 +332,11 @@ fun NavigationMapScreenNew(
                             routePaths = paths
                             selectedRouteIndex = 0
                             showRouteInfo = true
-                            
-                            // 绘制所有路线
+
                             aMap?.let { map ->
                                 clearOverlays(currentMarkers, currentPolylines)
                                 currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
-                                
-                                // 添加起终点标记
+
                                 val startMarker = map.addMarker(
                                     MarkerOptions()
                                         .position(currentLocation)
@@ -246,11 +350,9 @@ fun NavigationMapScreenNew(
                                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                                 )
                                 currentMarkers = listOf(startMarker, endMarker)
-                                
-                                // 缩放到显示整条路线
                                 zoomToRoute(map, paths[0])
                             }
-                            
+
                             if (paths.size > 1) {
                                 Toast.makeText(context, "找到 ${paths.size} 条路线", Toast.LENGTH_SHORT).show()
                             }
@@ -1193,7 +1295,7 @@ fun NavigationMapScreenNew(
                 totalSteps = navigationSteps.size,
                 currentStepIndex = currentStepIndex,
                 simulationProgress = simulationProgress,
-                destinationName = selectedPoi?.title ?: "目的地",
+                destinationName = selectedPoi?.title ?: directDestinationName ?: "目的地",
                 isProfessional = isProfessional,
                 onExitNavigation = {
                     navigationMode = NavigationMode.IDLE

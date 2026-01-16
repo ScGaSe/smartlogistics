@@ -1,6 +1,7 @@
 package com.example.smartlogistics.network
 
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.Response
 import retrofit2.http.*
 
@@ -131,4 +132,20 @@ interface ApiService {
     
     @GET("traffic/roads")
     suspend fun getRoadTraffic(): Response<List<RoadTraffic>>
+
+    // ==================== 智能停车助手 ====================
+
+    @Multipart
+    @POST("parking/register")
+    suspend fun registerParking(
+        @Part file: MultipartBody.Part,
+        @Part("floor") floor: RequestBody? = null,
+        @Part("zone") zone: RequestBody? = null
+    ): Response<ParkingRegisterResponse>
+
+    @Multipart
+    @POST("parking/find")
+    suspend fun findParking(
+        @Part file: MultipartBody.Part
+    ): Response<ParkingFindResponse>
 }

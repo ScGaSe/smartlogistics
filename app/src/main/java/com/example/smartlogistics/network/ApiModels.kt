@@ -279,3 +279,42 @@ data class ErrorResponse(
     val detail: String? = null,
     val message: String? = null
 )
+
+
+// ==================== 智能停车助手模型 ====================
+
+data class ParkingRegisterResponse(
+    val success: Boolean,
+    @SerializedName("session_id") val sessionId: String?,
+    @SerializedName("detected_info") val detectedInfo: ParkingDetectedInfo?,
+    val message: String?
+)
+
+data class ParkingDetectedInfo(
+    @SerializedName("parking_lot") val parkingLot: String?,
+    val floor: String?,
+    val zone: String?,
+    val landmarks: List<String>?
+)
+
+data class ParkingFindResponse(
+    val success: Boolean,
+    @SerializedName("match_confidence") val matchConfidence: Float?,
+    val location: ParkingLocationInfo?,
+    val navigation: ParkingNavigation?,
+    val message: String?
+)
+
+data class ParkingLocationInfo(
+    @SerializedName("parking_lot") val parkingLot: String?,
+    val floor: String?,
+    val zone: String?,
+    @SerializedName("photo_url") val photoUrl: String?
+)
+
+data class ParkingNavigation(
+    val distance: String?,
+    val directions: List<String>?,
+    val latitude: Double?,
+    val longitude: Double?
+)
