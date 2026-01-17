@@ -69,6 +69,7 @@ import java.net.URLEncoder
 // ==================== 货运司机主页 ====================
 @Composable
 fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    // 1. 扩展菜单项
     val menuItems = listOf(
         MenuItem("车辆绑定", Icons.Rounded.LocalShipping, "truck_bind"),
         MenuItem("路线规划", Icons.Rounded.Route, "truck_route"),
@@ -77,15 +78,12 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
         MenuItem("历史数据", Icons.Rounded.History, "truck_history"),
         MenuItem("货物报备", Icons.Rounded.Assignment, "cargo_report")
     )
-    
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val reports by viewModel?.reports?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
-    
     LaunchedEffect(Unit) {
         viewModel?.fetchVehicles()
         viewModel?.fetchReports()
     }
-    
     Column(modifier = Modifier.fillMaxSize().background(BackgroundPrimary)) {
         DashboardHeader(
             title = "智运货车版",
@@ -96,7 +94,6 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             onSearchClick = { navController.navigate("navigation_map") },
             onAiClick = { navController.navigate("ai_chat") }
         )
-        
         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             val pendingReport = reports.firstOrNull { it.status == "pending" }
             if (pendingReport != null) {
@@ -104,15 +101,12 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                     PendingTaskCard(title = "待处理报备", description = "您有1条货物报备待确认", onClick = { navController.navigate("cargo_report") })
                 }
             }
-            
             item {
                 QuickStatsCard(items = listOf("今日运单" to "12", "总里程" to "2,486km", "准时率" to "98%"), backgroundColor = TruckOrange)
             }
-            
             item {
                 Text(text = "常用功能", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             }
-            
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     menuItems.chunked(2).forEach { rowItems ->
@@ -127,12 +121,10 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                     }
                 }
             }
-            
             item {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(text = "最近报备", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
-            
             if (reports.isEmpty()) {
                 item {
                     EmptyState(icon = Icons.Rounded.Assignment, title = "暂无报备记录", subtitle = "完成首次货物报备后将显示在这里", actionText = "去报备", onAction = { navController.navigate("cargo_report") })
@@ -140,7 +132,6 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             } else {
                 items(reports.take(3)) { report -> RecentReportCard(report = report) }
             }
-            
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
@@ -214,10 +205,10 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<String?>(null) }
     val tfliteHelper = remember { TFLiteHelper(context) }
-    
+
     // ========== 相机拍照 Uri（重要！FileProvider 需要）==========
     var photoUri by remember { mutableStateOf<Uri?>(null) }
-    
+
     // ========== 生命周期安全的协程作用域 ==========
     val coroutineScope = rememberCoroutineScope()
 
@@ -297,14 +288,14 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             Toast.makeText(context, "需要相机权限才能拍照识别", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     // 启动相机的函数
     fun launchCamera() {
         if (CameraUtils.hasCameraPermission(context)) {
             // 已有权限，直接创建 Uri 并启动相机
             photoUri = CameraUtils.createImageUri(context)
-            photoUri?.let { 
-                cameraLauncher.launch(it) 
+            photoUri?.let {
+                cameraLauncher.launch(it)
             } ?: run {
                 recognitionResult = "无法创建图片文件"
             }
@@ -683,7 +674,7 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
 @Composable
 fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = null) {
     var destination by remember { mutableStateOf("") }
-    
+
     DetailScreenTemplate(navController = navController, title = "路线规划", backgroundColor = BackgroundPrimary) {
         // 路线输入卡片
         Card(
@@ -716,7 +707,7 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
                             .clickable { /* 刷新定位 */ }
                     )
                 }
-                
+
                 // 连接线
                 Box(
                     modifier = Modifier
@@ -725,7 +716,7 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
                         .height(20.dp)
                         .background(BorderLight)
                 )
-                
+
                 // 终点输入
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -765,9 +756,9 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(20.dp))
-        
+
         // 常用目的地
         Text(
             text = "常用目的地",
@@ -776,14 +767,14 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
             color = TextPrimary
         )
         Spacer(modifier = Modifier.height(12.dp))
-        
+
         // 常用目的地列表
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             TruckQuickDestinationItem(
                 icon = Icons.Rounded.Warehouse,
                 title = "1号仓库",
                 subtitle = "北京市朝阳区物流园区",
-                onClick = { 
+                onClick = {
                     val encodedDest = Uri.encode("北京市朝阳区物流园区 1号仓库")
                     navController.navigate("navigation_map?destination=$encodedDest")
                 }
@@ -792,7 +783,7 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
                 icon = Icons.Rounded.LocalShipping,
                 title = "3号货站",
                 subtitle = "北京市大兴区货运中心",
-                onClick = { 
+                onClick = {
                     val encodedDest = Uri.encode("北京市大兴区货运中心 3号货站")
                     navController.navigate("navigation_map?destination=$encodedDest")
                 }
@@ -801,15 +792,15 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
                 icon = Icons.Rounded.Factory,
                 title = "集装箱堆场",
                 subtitle = "天津港保税区",
-                onClick = { 
+                onClick = {
                     val encodedDest = Uri.encode("天津港保税区 集装箱堆场")
                     navController.navigate("navigation_map?destination=$encodedDest")
                 }
             )
         }
-        
+
         Spacer(modifier = Modifier.height(20.dp))
-        
+
         // 提示卡片
         TipCard(
             text = "系统将自动避开限高、限重路段，并考虑危化品车辆通行限制。",
@@ -817,15 +808,15 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
             backgroundColor = TruckOrangeLight,
             iconColor = TruckOrange
         )
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // 开始导航按钮
         PrimaryButton(
             text = "开始导航",
-            onClick = { 
+            onClick = {
                 val encodedDest = Uri.encode(destination)
-                navController.navigate("navigation_map?destination=$encodedDest") 
+                navController.navigate("navigation_map?destination=$encodedDest")
             },
             enabled = destination.isNotBlank(),
             backgroundColor = TruckOrange,
@@ -923,7 +914,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
     var showDetailDialog by remember { mutableStateOf(false) }
     var aMapInstance by remember { mutableStateOf<AMap?>(null) }
     var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
-    
+
     // 模拟货运路段数据（后端接入后替换为真实数据）
     val roadSegments = remember {
         listOf(
@@ -936,7 +927,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
             TruckRoadSegment("7", "园区环路主干道", "4.5km", "约10分钟", TruckRoadCongestionLevel.MODERATE, "高峰期车流量大，注意货车限速", "25km/h", "限速40km/h")
         )
     }
-    
+
     // 刷新数据
     val scope = rememberCoroutineScope()
     fun refreshData() {
@@ -947,7 +938,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
             isRefreshing = false
         }
     }
-    
+
     // 定位到当前位置
     fun locateToCurrentPosition() {
         currentLocation?.let { location ->
@@ -983,7 +974,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             tint = TextPrimary
                         )
                     }
-                    
+
                     // 标题
                     Text(
                         text = "道路实况",
@@ -993,7 +984,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
-                    
+
                     // 刷新按钮
                     IconButton(
                         onClick = { refreshData() },
@@ -1053,7 +1044,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             }
                         }
                     )
-                    
+
                     // 定位按钮
                     FloatingActionButton(
                         onClick = { locateToCurrentPosition() },
@@ -1074,7 +1065,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             modifier = Modifier.size(22.dp)
                         )
                     }
-                    
+
                     // 更新时间标签
                     Surface(
                         modifier = Modifier
@@ -1103,7 +1094,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         }
                     }
                 }
-                
+
                 // 路况图例
                 Card(
                     modifier = Modifier
@@ -1125,7 +1116,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         TruckTrafficLegendItem(color = CongestionSevere, label = "严重")
                     }
                 }
-                
+
                 // 路段列表标题
                 Row(
                     modifier = Modifier
@@ -1146,7 +1137,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         color = TextSecondary
                     )
                 }
-                
+
                 // 路段列表
                 LazyColumn(
                     modifier = Modifier
@@ -1168,7 +1159,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
             }
         }
     }
-    
+
     // 路段详情弹窗
     if (showDetailDialog && selectedSegment != null) {
         TruckRoadSegmentDetailDialog(
@@ -1214,9 +1205,9 @@ private fun TruckRoadSegmentCard(
                         shape = RoundedCornerShape(2.dp)
                     )
             )
-            
+
             Spacer(modifier = Modifier.width(12.dp))
-            
+
             // 路段信息
             Column(modifier = Modifier.weight(1f)) {
                 Row(
@@ -1275,7 +1266,7 @@ private fun TruckRoadSegmentCard(
                     )
                 }
             }
-            
+
             // 拥堵状态标签
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -1289,9 +1280,9 @@ private fun TruckRoadSegmentCard(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(8.dp))
-            
+
             // 箭头指示
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -1343,9 +1334,9 @@ private fun TruckRoadSegmentDetailDialog(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 路段名称和状态
                 Row(
                     verticalAlignment = Alignment.CenterVertically
@@ -1366,9 +1357,9 @@ private fun TruckRoadSegmentDetailDialog(
                         color = TextPrimary
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 详情信息
                 TruckDetailInfoRow(label = "当前状态", value = segment.congestionLevel.label, valueColor = segment.congestionLevel.textColor)
                 TruckDetailInfoRow(label = "通道长度", value = segment.distance)
@@ -1377,9 +1368,9 @@ private fun TruckRoadSegmentDetailDialog(
                 segment.truckRestriction?.let {
                     TruckDetailInfoRow(label = "通行限制", value = it, valueColor = TruckOrange)
                 }
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
+
                 // 路况描述
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -1405,9 +1396,9 @@ private fun TruckRoadSegmentDetailDialog(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(20.dp))
-                
+
                 // 导航按钮
                 Button(
                     onClick = { onNavigate(segment) },
@@ -2058,7 +2049,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val hazmatHelper = remember { HazmatRecognitionHelper(context) }
     var isHazmatRecognizing by remember { mutableStateOf(false) }
     var hazmatRecognitionResult by remember { mutableStateOf<HazmatRecognitionResult?>(null) }
-    
+
     // 危化品相机拍照的 Uri
     var hazmatPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -2125,7 +2116,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             hazmatPhotoUri?.let { hazmatCameraLauncher.launch(it) }
         }
     }
-    
+
     // 启动危化品相机的函数
     fun launchHazmatCamera() {
         if (CameraUtils.hasCameraPermission(context)) {
@@ -2403,6 +2394,99 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                                 modifier = Modifier.size(24.dp)
                                             )
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // ========== 危险品类别选择器（13类） ==========
+                    Text(
+                        text = "选择危险品类别",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 使用 LazyRow 横向滚动展示所有13类危险品
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(HazmatRecognitionHelper.HAZMAT_CLASSES.values.toList()) { hazmatClass ->
+                            val isSelected = hazardClass == hazmatClass.name
+                            Card(
+                                modifier = Modifier
+                                    .width(100.dp)
+                                    .clickable {
+                                        hazardClass = hazmatClass.name
+                                        // 同步更新识别结果状态
+                                        hazmatRecognitionResult = HazmatRecognitionResult(
+                                            hazmatClass = hazmatClass,
+                                            confidence = 1.0f,
+                                            isHazardous = true,
+                                            classIndex = hazmatClass.code.toIntOrNull() ?: -1
+                                        )
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected)
+                                        Color(hazmatClass.colorInt).copy(alpha = 0.2f)
+                                    else
+                                        Color.White
+                                ),
+                                border = BorderStroke(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) Color(hazmatClass.colorInt) else BorderLight
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    // 类别图标/编号
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(
+                                                Color(hazmatClass.colorInt).copy(alpha = if (isSelected) 1f else 0.7f),
+                                                RoundedCornerShape(8.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = hazmatClass.icon,
+                                            fontSize = 18.sp
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    // 类别名称
+                                    Text(
+                                        text = hazmatClass.name,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color(hazmatClass.colorInt) else TextPrimary,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        lineHeight = 14.sp
+                                    )
+
+                                    // 选中标识
+                                    if (isSelected) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Icon(
+                                            imageVector = Icons.Rounded.CheckCircle,
+                                            contentDescription = "已选择",
+                                            tint = Color(hazmatClass.colorInt),
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                 }
                             }
