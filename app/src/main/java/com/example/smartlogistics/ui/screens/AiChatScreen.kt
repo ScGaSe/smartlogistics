@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.ui.components.PermissionGuideDialog
+import com.example.smartlogistics.ui.components.PermissionType
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.viewmodel.AIState
 import com.example.smartlogistics.viewmodel.MainViewModel
@@ -66,14 +68,28 @@ fun AiChatScreen(
     val partialText by speechHelper.partialText.collectAsState()
     var showVoiceDialog by remember { mutableStateOf(false) }
 
-    // 权限检查（不使用动态请求，避免 requestCode bug）
-    var showPermissionDialog by remember { mutableStateOf(false) }
+    // 权限相关状态
+    var showPermissionGuideDialog by remember { mutableStateOf(false) }
 
     fun hasRecordPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    // 录音权限请求launcher（与拍照权限处理方式一致）
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            // 权限授予成功，直接开始语音识别
+            showVoiceDialog = true
+            speechHelper.startListening()
+        } else {
+            // 权限被拒绝，显示引导对话框
+            showPermissionGuideDialog = true
+        }
     }
 
     // 处理语音识别结果
@@ -257,7 +273,8 @@ fun AiChatScreen(
                             showVoiceDialog = true
                             speechHelper.startListening()
                         } else {
-                            showPermissionDialog = true
+                            // 使用launcher请求权限（与拍照权限处理方式一致）
+                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
                     onSend = {
@@ -289,33 +306,14 @@ fun AiChatScreen(
             }
         }
 
-        // 权限提示对话框
-        if (showPermissionDialog) {
-            AlertDialog(
-                onDismissRequest = { showPermissionDialog = false },
-                title = { Text("需要录音权限", fontWeight = FontWeight.Bold) },
-                text = { Text("请在系统设置中允许本应用使用麦克风，才能使用语音功能") },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showPermissionDialog = false
-                            val intent = android.content.Intent(
-                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                android.net.Uri.fromParts("package", context.packageName, null)
-                            )
-                            context.startActivity(intent)
-                        }
-                    ) {
-                        Text("去设置", color = primaryColor)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showPermissionDialog = false }) {
-                        Text("取消")
-                    }
-                }
-            )
-        }
+        // 权限引导对话框（与拍照、定位权限样式一致）
+        PermissionGuideDialog(
+            showDialog = showPermissionGuideDialog,
+            onDismiss = { showPermissionGuideDialog = false },
+            permissionType = PermissionType.MICROPHONE,
+            context = context,
+            primaryColor = primaryColor
+        )
     }
 }
 
@@ -410,7 +408,7 @@ private fun VoiceRecordingDialog(
                                 else -> 8f
                             }
                             val height = baseHeight * (0.4f + volumeLevel * 0.6f)
-                            
+
                             Box(
                                 modifier = Modifier
                                     .width(4.dp)

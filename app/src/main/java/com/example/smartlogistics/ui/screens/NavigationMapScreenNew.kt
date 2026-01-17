@@ -2,9 +2,12 @@ package com.example.smartlogistics.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -152,10 +156,21 @@ fun NavigationMapScreenNew(
         )
     }
 
+    // ⭐ 权限对话框状态
+    var showPermissionDialog by remember { mutableStateOf(false) }
+    var permissionDeniedPermanently by remember { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        hasLocationPermission = granted
+
+        if (!granted) {
+            // 检查是否是永久拒绝（用户选择了"不再询问"）
+            permissionDeniedPermanently = true
+            showPermissionDialog = true
+        }
     }
 
 // 如果没有权限，显示提示让用户点击
@@ -176,6 +191,16 @@ fun NavigationMapScreenNew(
                     mapView?.onResume()
                     // 连接道路实况WebSocket
                     trafficWebSocket.connect()
+                    // ⭐ 从设置返回后重新检查权限状态
+                    val newPermissionState = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (newPermissionState != hasLocationPermission) {
+                        hasLocationPermission = newPermissionState
+                        if (newPermissionState) {
+                            permissionDeniedPermanently = false
+                        }
+                    }
                 }
                 Lifecycle.Event.ON_PAUSE -> {
                     mapView?.onPause()
@@ -197,6 +222,21 @@ fun NavigationMapScreenNew(
             locationClient?.onDestroy()
             mapView?.onDestroy()
             trafficWebSocket.disconnect()
+        }
+    }
+
+    // ==================== 权限变化后启动定位 ====================
+    // 当权限被授予且地图已初始化时，启动定位
+    LaunchedEffect(hasLocationPermission, aMap) {
+        if (hasLocationPermission && aMap != null && locationClient == null) {
+            setupLocation(context, aMap!!) { client, location ->
+                locationClient = client
+                val newLocation = LatLng(location.latitude, location.longitude)
+                currentLocation = newLocation
+
+                // 首次定位成功后，移动地图到当前位置
+                aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
+            }
         }
     }
 
@@ -782,8 +822,25 @@ fun NavigationMapScreenNew(
                 // 定位按钮（同心圆样式）
                 Surface(
                     onClick = {
-                        currentLocation?.let { loc ->
-                            aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(loc, 17f))
+                        if (hasLocationPermission) {
+                            // 有权限，直接定位
+                            currentLocation?.let { loc ->
+                                aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(loc, 17f))
+                            } ?: run {
+                                Toast.makeText(context, "正在获取位置...", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            // 没有权限，请求权限或显示对话框
+                            if (permissionDeniedPermanently) {
+                                showPermissionDialog = true
+                            } else {
+                                permissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            }
                         }
                     },
                     modifier = Modifier.size(50.dp),
@@ -797,14 +854,23 @@ fun NavigationMapScreenNew(
                             val strokeWidth = 2.dp.toPx()
                             // 外圈（空心）- 半径为画布一半减去线宽一半
                             drawCircle(
-                                color = primaryColor,
+                                color = if (hasLocationPermission) primaryColor else TextSecondary,
                                 radius = (size.minDimension - strokeWidth) / 2,
                                 style = Stroke(width = strokeWidth)
                             )
                             // 内圈（实心）- 更大的内圆
                             drawCircle(
-                                color = primaryColor,
+                                color = if (hasLocationPermission) primaryColor else TextSecondary,
                                 radius = size.minDimension / 4
+                            )
+                        }
+                        // 无权限时显示警告标记
+                        if (!hasLocationPermission) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(10.dp)
+                                    .background(Color(0xFFE57373), CircleShape)
                             )
                         }
                     }
@@ -1550,6 +1616,55 @@ fun NavigationMapScreenNew(
                 onResumeNavigation = {
                     if (navigationMode == NavigationMode.PAUSED) {
                         navigationMode = NavigationMode.NAVIGATING
+                    }
+                }
+            )
+        }
+
+        // ⭐ 位置权限引导对话框
+        if (showPermissionDialog) {
+            AlertDialog(
+                onDismissRequest = { showPermissionDialog = false },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(48.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "需要位置权限",
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                },
+                text = {
+                    Text(
+                        text = "为了显示您的实时位置并提供精准导航服务，请允许访问位置权限。\n\n请前往设置 → 权限 → 位置，选择「始终允许」或「仅在使用时允许」。",
+                        textAlign = TextAlign.Center,
+                        color = TextSecondary
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showPermissionDialog = false
+                            // 跳转到应用设置页面
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                            }
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                    ) {
+                        Text("去设置")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPermissionDialog = false }) {
+                        Text("稍后再说", color = TextSecondary)
                     }
                 }
             )
