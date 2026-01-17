@@ -64,14 +64,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 
-// ==================== 车型英文转中文映射 ====================
+// ==================== 车型英文转中文映射（与UI选项标签一致）====================
 private fun mapVehicleTypeToCn(vehicleType: String?): String {
     return when (vehicleType?.lowercase()) {
-        "truck" -> "货车"
+        "truck" -> "卡车"              // 与UI选项一致
+        "van" -> "小型货车"            // 与UI选项一致
         "bus" -> "客车"
         "car", "sedan" -> "轿车"
         "suv" -> "SUV"
-        "van" -> "面包车"
         "pickup" -> "皮卡"
         "motorcycle" -> "摩托车"
         "minibus" -> "小型客车"
