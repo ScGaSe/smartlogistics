@@ -32,7 +32,7 @@ object RetrofitClient {
     // 真机调试用电脑局域网IP，如 192.168.1.100
     private const val REAL_BASE_URL = "http://192.168.31.4:8000/"
 
-    private var baseUrl = MOCK_BASE_URL
+    private var baseUrl = REAL_BASE_URL
     private var retrofit: Retrofit? = null
     private var tokenManager: TokenManager? = null
 
@@ -42,7 +42,7 @@ object RetrofitClient {
      * @param useMock true使用Mock Server, false使用真实后端
      * @param customBaseUrl 可选的自定义API地址
      */
-    fun init(context: Context, useMock: Boolean = true, customBaseUrl: String? = null) {
+    fun init(context: Context, useMock: Boolean = false, customBaseUrl: String? = null) {
         tokenManager = TokenManager(context)
         baseUrl = customBaseUrl ?: if (useMock) MOCK_BASE_URL else REAL_BASE_URL
         retrofit = createRetrofit()

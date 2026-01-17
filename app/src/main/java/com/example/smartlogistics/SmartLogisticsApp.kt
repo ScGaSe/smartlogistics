@@ -16,7 +16,7 @@ class SmartLogisticsApp : Application() {
         // 初始化网络客户端 - 使用真实后端
         RetrofitClient.init(
             context = this,
-            useMock = true  // false = 使用真实后端
+            useMock = false  // false = 使用真实后端
         )
 
         // 定位服务隐私合规

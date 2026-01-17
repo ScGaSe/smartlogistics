@@ -50,11 +50,8 @@ class MainActivity : FragmentActivity() {
             e.printStackTrace()
         }
 
-        // 初始化网络客户端
-        com.example.smartlogistics.network.RetrofitClient.init(
-            context = applicationContext,
-            useMock = true
-        )
+        // 网络客户端已在 SmartLogisticsApp.onCreate() 中初始化
+        // 无需重复初始化
 
         // ⭐ 初始化通知服务
         NotificationService.getInstance().initialize(this)
