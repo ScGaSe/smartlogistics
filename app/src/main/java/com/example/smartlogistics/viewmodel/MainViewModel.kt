@@ -1,6 +1,7 @@
 package com.example.smartlogistics.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.smartlogistics.network.*
@@ -12,8 +13,13 @@ import kotlinx.coroutines.launch
 /**
  * 主ViewModel
  * 管理全局状态和通用数据
+ * 与后端API真实对接
  */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "MainViewModel"
+    }
 
     private val repository = Repository(application.applicationContext)
 
@@ -27,7 +33,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _userInfo = MutableStateFlow<UserInfo?>(null)
     val userInfo: StateFlow<UserInfo?> = _userInfo.asStateFlow()
 
-    // 保存用户选择的角色
     private val _userRole = MutableStateFlow("personal")
     val userRole: StateFlow<String> = _userRole.asStateFlow()
 
@@ -53,11 +58,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val tripState: StateFlow<TripState> = _tripState.asStateFlow()
 
     // ==================== 导航状态 ====================
-    private val _routeResult = MutableStateFlow<RouteResult?>(null)
-    val routeResult: StateFlow<RouteResult?> = _routeResult.asStateFlow()
-
-    private val _trafficData = MutableStateFlow<TrafficData?>(null)
-    val trafficData: StateFlow<TrafficData?> = _trafficData.asStateFlow()
+    private val _routeResult = MutableStateFlow<RouteResponse?>(null)
+    val routeResult: StateFlow<RouteResponse?> = _routeResult.asStateFlow()
 
     // ==================== AI助手状态 ====================
     private val _aiResponse = MutableStateFlow<AskResponse?>(null)
@@ -70,9 +72,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _congestionData = MutableStateFlow<CongestionResponse?>(null)
     val congestionData: StateFlow<CongestionResponse?> = _congestionData.asStateFlow()
 
-    // ==================== 停车预测 ====================
-    private val _parkingPredictions = MutableStateFlow<List<ParkingPrediction>>(emptyList())
-    val parkingPredictions: StateFlow<List<ParkingPrediction>> = _parkingPredictions.asStateFlow()
+    private val _congestionState = MutableStateFlow<CongestionState>(CongestionState.Idle)
+    val congestionState: StateFlow<CongestionState> = _congestionState.asStateFlow()
+
+    // ==================== 闸口排队数据 ====================
+    private val _gateQueues = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val gateQueues: StateFlow<Map<String, Int>> = _gateQueues.asStateFlow()
 
     // ==================== POI数据 ====================
     private val _pois = MutableStateFlow<List<POI>>(emptyList())
@@ -82,9 +87,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _parkingList = MutableStateFlow<List<ParkingInfo>>(emptyList())
     val parkingList: StateFlow<List<ParkingInfo>> = _parkingList.asStateFlow()
 
-    // ==================== 闸口排队数据 ====================
-    private val _gateQueues = MutableStateFlow<Map<String, Int>>(emptyMap())
-    val gateQueues: StateFlow<Map<String, Int>> = _gateQueues.asStateFlow()
+    // ==================== 停车预测 ====================
+    private val _parkingPrediction = MutableStateFlow<ParkingPredictResponse?>(null)
+    val parkingPrediction: StateFlow<ParkingPredictResponse?> = _parkingPrediction.asStateFlow()
+
+    // ==================== 位置共享状态 ====================
+    private val _locationShare = MutableStateFlow<LocationShareResponse?>(null)
+    val locationShare: StateFlow<LocationShareResponse?> = _locationShare.asStateFlow()
 
     // ==================== 认证方法 ====================
 
@@ -93,12 +102,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _authState.value = AuthState.Loading
             when (val result = repository.register(phoneNumber, password, role)) {
                 is NetworkResult.Success -> {
+                    Log.d(TAG, "Register success: ${result.data}")
                     _authState.value = AuthState.RegisterSuccess
                 }
                 is NetworkResult.Error -> {
+                    Log.e(TAG, "Register error: ${result.message}")
                     _authState.value = AuthState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
+                    Log.e(TAG, "Register exception: ${result.throwable.message}")
                     _authState.value = AuthState.Error(result.throwable.message ?: "注册失败")
                 }
                 else -> {}
@@ -106,68 +118,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ==================== 停车场列表方法 ====================
-    fun fetchAllParking() {
-        viewModelScope.launch {
-            when (val result = repository.getAllParking()) {
-                is NetworkResult.Success -> {
-                    _parkingList.value = result.data
-                }
-                else -> {}
-            }
-        }
-    }
-
-    // ==================== 闸口排队方法 ====================
-    fun fetchGateQueues() {
-        viewModelScope.launch {
-            when (val result = repository.getGateQueues()) {
-                is NetworkResult.Success -> {
-                    _gateQueues.value = result.data
-                }
-                else -> {}
-            }
-        }
-    }
-
-    /**
-     * 登录方法 - 登录后获取用户信息并校验角色
-     */
     fun login(username: String, password: String, selectedRole: String) {
-        android.util.Log.d("LOGIN_DEBUG", "========== 开始登录 ==========")
-        android.util.Log.d("LOGIN_DEBUG", "用户名: $username")
-        android.util.Log.d("LOGIN_DEBUG", "用户选择的角色: $selectedRole")
-        
+        Log.d(TAG, "Starting login for user: $username with role: $selectedRole")
+
         viewModelScope.launch {
             _authState.value = AuthState.Loading
 
             when (val result = repository.login(username, password)) {
                 is NetworkResult.Success -> {
-                    android.util.Log.d("LOGIN_DEBUG", "✓ 登录接口成功，开始获取用户信息...")
-                    
+                    Log.d(TAG, "Login successful, fetching user info...")
+
                     when (val meResult = repository.getCurrentUser()) {
                         is NetworkResult.Success -> {
                             val userInfo = meResult.data
                             val actualRole = userInfo.role
                             val targetHome = if (actualRole == "professional") "truck_home" else "car_home"
-                            
-                            android.util.Log.d("LOGIN_DEBUG", "✓ 获取用户信息成功")
-                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.id: ${userInfo.id}")
-                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.role: '${userInfo.role}'")
-                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.phoneNumber: ${userInfo.phoneNumber}")
-                            android.util.Log.d("LOGIN_DEBUG", "  selectedRole: '$selectedRole'")
-                            android.util.Log.d("LOGIN_DEBUG", "  actualRole: '$actualRole'")
-                            android.util.Log.d("LOGIN_DEBUG", "  比较结果: selectedRole == actualRole ? ${selectedRole == actualRole}")
-                            android.util.Log.d("LOGIN_DEBUG", "  targetHome: $targetHome")
-                            
+
+                            Log.d(TAG, "User info received - role: $actualRole, selected: $selectedRole")
+
                             if (selectedRole == actualRole) {
-                                android.util.Log.d("LOGIN_DEBUG", "→ 角色匹配，正常登录到 $targetHome")
                                 _isLoggedIn.value = true
                                 _userInfo.value = userInfo
                                 _userRole.value = actualRole
                                 _authState.value = AuthState.LoginSuccess(targetHome)
                             } else {
-                                android.util.Log.d("LOGIN_DEBUG", "→ 角色不匹配！弹出切换对话框")
                                 _userInfo.value = userInfo
                                 _authState.value = AuthState.RoleMismatch(
                                     selectedRole = selectedRole,
@@ -177,58 +151,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                         is NetworkResult.Error -> {
-                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息失败: ${meResult.message}")
+                            Log.e(TAG, "Get user info error: ${meResult.message}")
                             _authState.value = AuthState.Error("获取用户信息失败: ${meResult.message}")
                         }
                         is NetworkResult.Exception -> {
-                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息异常: ${meResult.throwable.message}")
-                            meResult.throwable.printStackTrace()
+                            Log.e(TAG, "Get user info exception: ${meResult.throwable.message}")
                             _authState.value = AuthState.Error("获取用户信息失败")
                         }
-                        else -> {
-                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息返回未知状态")
-                        }
+                        else -> {}
                     }
                 }
                 is NetworkResult.Error -> {
-                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录失败: ${result.message}")
+                    Log.e(TAG, "Login error: ${result.message}")
                     _authState.value = AuthState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
-                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录异常: ${result.throwable.message}")
-                    result.throwable.printStackTrace()
+                    Log.e(TAG, "Login exception: ${result.throwable.message}")
                     _authState.value = AuthState.Error(result.throwable.message ?: "登录失败")
                 }
-                else -> {
-                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录返回未知状态")
-                }
+                else -> {}
             }
-            android.util.Log.d("LOGIN_DEBUG", "========== 登录流程结束 ==========")
-        }
-    }
-    
-    /**
-     * 确认使用实际角色登录（角色不匹配时用户选择切换）
-     */
-    fun confirmLoginWithActualRole(actualRole: String, targetHome: String) {
-        _isLoggedIn.value = true
-        _userRole.value = actualRole
-        _authState.value = AuthState.LoginSuccess(targetHome)
-    }
-    
-    /**
-     * 取消登录（角色不匹配时用户选择不切换）
-     */
-    fun cancelMismatchedLogin() {
-        _userInfo.value = null
-        _authState.value = AuthState.Idle
-        // 清除已保存的 token
-        viewModelScope.launch {
-            repository.logout()
         }
     }
 
-    // ==================== 找回密码相关 ====================
+    /**
+     * 指纹登录
+     */
+    fun biometricLogin(deviceId: String, selectedRole: String) {
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+
+            when (val result = repository.biometricLogin(deviceId)) {
+                is NetworkResult.Success -> {
+                    when (val meResult = repository.getCurrentUser()) {
+                        is NetworkResult.Success -> {
+                            val userInfo = meResult.data
+                            val actualRole = userInfo.role
+                            val targetHome = if (actualRole == "professional") "truck_home" else "car_home"
+
+                            _isLoggedIn.value = true
+                            _userInfo.value = userInfo
+                            _userRole.value = actualRole
+                            _authState.value = AuthState.LoginSuccess(targetHome)
+                        }
+                        is NetworkResult.Error -> {
+                            _authState.value = AuthState.Error(meResult.message)
+                        }
+                        is NetworkResult.Exception -> {
+                            _authState.value = AuthState.Error("获取用户信息失败")
+                        }
+                        else -> {}
+                    }
+                }
+                is NetworkResult.Error -> {
+                    _authState.value = AuthState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _authState.value = AuthState.Error(result.throwable.message ?: "指纹登录失败")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    /**
+     * 绑定设备（用于指纹登录）
+     */
+    fun bindDevice(deviceId: String) {
+        viewModelScope.launch {
+            when (val result = repository.bindDevice(deviceId)) {
+                is NetworkResult.Success -> {
+                    _userInfo.value = result.data
+                    Log.d(TAG, "Device bound successfully")
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Bind device error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Bind device exception: ${result.throwable.message}")
+                }
+                else -> {}
+            }
+        }
+    }
 
     /**
      * 发送验证码
@@ -246,7 +251,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is NetworkResult.Exception -> {
                     _authState.value = AuthState.Error(result.throwable.message ?: "发送验证码失败")
                 }
-                is NetworkResult.Loading -> { /* 忽略 */ }
+                else -> {}
             }
         }
     }
@@ -265,42 +270,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _authState.value = AuthState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
-                    _authState.value = AuthState.Error(result.throwable.message ?: "密码重置失败")
-                }
-                is NetworkResult.Loading -> { /* 忽略 */ }
-            }
-        }
-    }
-
-    fun logout() {
-        // ⭐ 登出时断开用户通知WebSocket
-        NotificationService.getInstance().disconnect()
-
-        repository.logout()
-        _isLoggedIn.value = false
-        _userInfo.value = null
-        _userRole.value = "personal"
-        _vehicles.value = emptyList()
-        _reports.value = emptyList()
-        _trips.value = emptyList()
-        _authState.value = AuthState.Idle
-    }
-
-    fun fetchCurrentUser() {
-        viewModelScope.launch {
-            when (val result = repository.getCurrentUser()) {
-                is NetworkResult.Success -> {
-                    _userInfo.value = result.data
+                    _authState.value = AuthState.Error(result.throwable.message ?: "重置密码失败")
                 }
                 else -> {}
             }
         }
     }
 
-    fun isProfessionalMode(): Boolean = _userRole.value == "professional"
+    /**
+     * 确认角色切换后继续登录
+     */
+    fun confirmRoleMismatch() {
+        val currentState = _authState.value
+        if (currentState is AuthState.RoleMismatch) {
+            _isLoggedIn.value = true
+            _userRole.value = currentState.actualRole
+            _authState.value = AuthState.LoginSuccess(currentState.targetHome)
+        }
+    }
+
+    fun logout() {
+        repository.logout()
+        _isLoggedIn.value = false
+        _userInfo.value = null
+        _vehicles.value = emptyList()
+        _reports.value = emptyList()
+        _trips.value = emptyList()
+    }
+
+    fun isProfessionalMode(): Boolean = repository.isProfessionalMode()
+
     fun getUserName(): String = repository.getUserName()
 
-    // ==================== 车辆方法 ====================
+    // ==================== 车辆管理方法 ====================
 
     fun fetchVehicles() {
         viewModelScope.launch {
@@ -324,37 +326,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun bindVehicle(
         plateNumber: String,
         vehicleType: String,
+        brand: String = "",
         heightM: Double? = null,
         weightT: Double? = null,
         axleCount: Int? = null
     ) {
         viewModelScope.launch {
             _vehicleState.value = VehicleState.Loading
-            when (val result = repository.bindVehicle(plateNumber, vehicleType, heightM, weightT, axleCount)) {
+            when (val result = repository.bindVehicle(plateNumber, vehicleType, brand, heightM, weightT, axleCount)) {
                 is NetworkResult.Success -> {
-                    _vehicles.value = _vehicles.value + result.data
+                    _vehicles.value = listOf(result.data) + _vehicles.value
                     _vehicleState.value = VehicleState.BindSuccess
                 }
                 is NetworkResult.Error -> {
                     _vehicleState.value = VehicleState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
-                    _vehicleState.value = VehicleState.Error(result.throwable.message ?: "绑定失败")
+                    _vehicleState.value = VehicleState.Error(result.throwable.message ?: "绑定车辆失败")
                 }
                 else -> {}
             }
         }
     }
 
-    fun unbindVehicle(vehicleId: String) {
+    fun unbindVehicle(vehicleId: Int) {
         viewModelScope.launch {
-            if (repository.unbindVehicle(vehicleId)) {
-                _vehicles.value = _vehicles.value.filter { it.vehicleId != vehicleId }
+            _vehicleState.value = VehicleState.Loading
+            when (val result = repository.unbindVehicle(vehicleId)) {
+                is NetworkResult.Success -> {
+                    _vehicles.value = _vehicles.value.filterNot { it.id == vehicleId }
+                    _vehicleState.value = VehicleState.Success
+                }
+                is NetworkResult.Error -> {
+                    _vehicleState.value = VehicleState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _vehicleState.value = VehicleState.Error(result.throwable.message ?: "解绑车辆失败")
+                }
+                else -> {}
             }
         }
     }
 
-    // ==================== 报备方法 (专业模式) ====================
+    // ==================== 货物报备方法 (专业模式) ====================
 
     fun fetchReports(page: Int = 1) {
         viewModelScope.launch {
@@ -368,7 +382,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _reportState.value = ReportState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
-                    _reportState.value = ReportState.Error(result.throwable.message ?: "获取报备记录失败")
+                    _reportState.value = ReportState.Error(result.throwable.message ?: "获取报备失败")
                 }
                 else -> {}
             }
@@ -376,8 +390,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun submitReport(
-        vehicleId: String,
-        destinationId: String,
+        vehicleId: Int,
+        destinationPoiId: String,
         cargoType: String,
         isHazardous: Boolean,
         hazardClass: String? = null,
@@ -387,7 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _reportState.value = ReportState.Loading
             when (val result = repository.submitCargoReport(
-                vehicleId, destinationId, cargoType, isHazardous, hazardClass, weight, description
+                vehicleId, destinationPoiId, cargoType, isHazardous, hazardClass, weight, description
             )) {
                 is NetworkResult.Success -> {
                     _reports.value = listOf(result.data) + _reports.value
@@ -404,7 +418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ==================== 行程方法 (个人模式) ====================
+    // ==================== 行程管理方法 (个人模式) ====================
 
     fun fetchTrips() {
         viewModelScope.launch {
@@ -444,41 +458,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteTrip(tripId: Int) {
+        viewModelScope.launch {
+            _tripState.value = TripState.Loading
+            when (val result = repository.deleteTrip(tripId)) {
+                is NetworkResult.Success -> {
+                    _trips.value = _trips.value.filterNot { it.id == tripId }
+                    _tripState.value = TripState.Success
+                }
+                is NetworkResult.Error -> {
+                    _tripState.value = TripState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _tripState.value = TripState.Error(result.throwable.message ?: "删除行程失败")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // ==================== 位置共享方法 ====================
+
+    fun createLocationShare(tripId: Int, expiresInHours: Int = 24) {
+        viewModelScope.launch {
+            when (val result = repository.createLocationShare(tripId, expiresInHours)) {
+                is NetworkResult.Success -> {
+                    _locationShare.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Create location share error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Create location share exception: ${result.throwable.message}")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    fun stopLocationShare(tripId: Int) {
+        viewModelScope.launch {
+            when (val result = repository.stopLocationShare(tripId)) {
+                is NetworkResult.Success -> {
+                    _locationShare.value = null
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Stop location share error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Stop location share exception: ${result.throwable.message}")
+                }
+                else -> {}
+            }
+        }
+    }
+
     // ==================== 导航方法 ====================
 
-    fun getRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null) {
+    fun planRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null) {
         viewModelScope.launch {
-            when (val result = repository.getRoute(startPoiId, endPoiId, vehicleId)) {
+            when (val result = repository.planRoute(startPoiId, endPoiId, vehicleId)) {
                 is NetworkResult.Success -> {
                     _routeResult.value = result.data
                 }
-                else -> {}
-            }
-        }
-    }
-
-    fun fetchTrafficData() {
-        viewModelScope.launch {
-            when (val result = repository.getTrafficData()) {
-                is NetworkResult.Success -> {
-                    _trafficData.value = result.data
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Plan route error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Plan route exception: ${result.throwable.message}")
                 }
                 else -> {}
             }
         }
     }
 
-    // ==================== AI助手方法 ★★★ ====================
+    // ==================== AI助手方法 ====================
 
-    /**
-     * AI智能问答
-     * @param query 用户问题
-     * @param role 用户角色 (professional/personal)
-     */
     fun askAI(query: String, role: String? = null) {
         viewModelScope.launch {
             _aiState.value = AIState.Loading
-            val userRole = role ?: if (isProfessionalMode()) "professional" else "personal"
+            val userRole = role ?: if (isProfessionalMode()) "truck" else "car"
 
             when (val result = repository.askAI(query, userRole)) {
                 is NetworkResult.Success -> {
@@ -496,13 +555,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ==================== 拥堵预测方法 ★★★ ====================
+    // ==================== 拥堵预测方法 ====================
 
-    fun predictCongestion(roadId: String, hours: Int = 2) {
+    fun predictCongestion(roadId: String? = null, lat: Double? = null, lng: Double? = null, hours: Int = 5) {
         viewModelScope.launch {
-            when (val result = repository.predictCongestion(roadId = roadId, hours = hours)) {
+            _congestionState.value = CongestionState.Loading
+            when (val result = repository.predictCongestion(roadId, lat, lng, hours = hours)) {
                 is NetworkResult.Success -> {
                     _congestionData.value = result.data
+                    _congestionState.value = CongestionState.Success
+                }
+                is NetworkResult.Error -> {
+                    _congestionState.value = CongestionState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _congestionState.value = CongestionState.Error(result.throwable.message ?: "拥堵预测失败")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // ==================== 闸口排队方法 ====================
+
+    fun fetchGateQueues() {
+        viewModelScope.launch {
+            when (val result = repository.getGateQueues()) {
+                is NetworkResult.Success -> {
+                    _gateQueues.value = result.data.queues ?: emptyMap()
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Fetch gate queues error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Fetch gate queues exception: ${result.throwable.message}")
                 }
                 else -> {}
             }
@@ -513,23 +599,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchPOIs(type: String? = null) {
         viewModelScope.launch {
-            val poiType = if (isProfessionalMode()) "truck" else "car"
-            when (val result = repository.getPOIs(type = type ?: poiType)) {
+            val role = if (isProfessionalMode()) "truck" else "car"
+            when (val result = repository.getPOIs(role, type)) {
                 is NetworkResult.Success -> {
                     _pois.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Fetch POIs error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Fetch POIs exception: ${result.throwable.message}")
                 }
                 else -> {}
             }
         }
     }
 
-    // ==================== 停车预测方法 ====================
-
-    fun fetchParkingPrediction(arrivalTime: String) {
+    fun fetchNearbyPOIs(lat: Double, lng: Double, radius: Int = 1000, type: String? = null) {
         viewModelScope.launch {
-            when (val result = repository.getParkingPrediction(arrivalTime)) {
+            when (val result = repository.getNearbyPOIs(lat, lng, radius, type)) {
                 is NetworkResult.Success -> {
-                    _parkingPredictions.value = result.data
+                    _pois.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Fetch nearby POIs error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Fetch nearby POIs exception: ${result.throwable.message}")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // ==================== 停车场方法 ====================
+
+    fun fetchNearbyParking(lat: Double, lng: Double, radius: Int = 2000) {
+        viewModelScope.launch {
+            when (val result = repository.getNearbyParking(lat, lng, radius)) {
+                is NetworkResult.Success -> {
+                    _parkingList.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Fetch parking error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Fetch parking exception: ${result.throwable.message}")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    fun predictParking(lotId: String, hours: Int = 3) {
+        viewModelScope.launch {
+            when (val result = repository.predictParking(lotId, hours)) {
+                is NetworkResult.Success -> {
+                    _parkingPrediction.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "Predict parking error: ${result.message}")
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "Predict parking exception: ${result.throwable.message}")
                 }
                 else -> {}
             }
@@ -557,6 +689,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetAIState() {
         _aiState.value = AIState.Idle
     }
+
+    fun resetCongestionState() {
+        _congestionState.value = CongestionState.Idle
+    }
 }
 
 // ==================== 状态类定义 ====================
@@ -566,16 +702,9 @@ sealed class AuthState {
     object Loading : AuthState()
     object RegisterSuccess : AuthState()
     data class LoginSuccess(val targetHome: String) : AuthState()
-    object CodeSent : AuthState()           // 验证码已发送
-    object ResetPasswordSuccess : AuthState() // 密码重置成功
+    object CodeSent : AuthState()
+    object ResetPasswordSuccess : AuthState()
     data class Error(val message: String) : AuthState()
-    
-    /**
-     * 角色不匹配状态
-     * @param selectedRole 用户选择的角色
-     * @param actualRole 账号实际角色
-     * @param targetHome 实际角色对应的首页路由
-     */
     data class RoleMismatch(
         val selectedRole: String,
         val actualRole: String,
@@ -612,4 +741,11 @@ sealed class AIState {
     object Loading : AIState()
     object Success : AIState()
     data class Error(val message: String) : AIState()
+}
+
+sealed class CongestionState {
+    object Idle : CongestionState()
+    object Loading : CongestionState()
+    object Success : CongestionState()
+    data class Error(val message: String) : CongestionState()
 }

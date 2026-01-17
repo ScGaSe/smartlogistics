@@ -104,7 +104,7 @@ fun LoginScreen(
 
                 // ⭐ 登录成功后连接用户通知WebSocket
                 val userInfo = viewModel?.userInfo?.value
-                val userId = userInfo?.id ?: userInfo?.userId ?: 1
+                val userId = userInfo?.id ?: 1
                 NotificationService.getInstance().connect(userId)
 
                 navController.navigate(targetHome) {

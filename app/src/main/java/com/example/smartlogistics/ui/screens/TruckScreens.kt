@@ -1,10 +1,5 @@
 package com.example.smartlogistics.ui.screens
 
-import CongestionDataPoint
-import CongestionDetailCard
-import RoadCongestionList
-import TTITrendChart
-import TimeRangeSelector
 import android.Manifest
 import android.R.attr.text
 import android.content.pm.PackageManager
@@ -54,7 +49,9 @@ import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.ReportState
-import generateMockCongestionData
+import com.example.smartlogistics.viewmodel.CongestionState
+import com.example.smartlogistics.network.CongestionResponse
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -63,7 +60,6 @@ import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.location.AMapLocation
-import getTTILevel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
@@ -107,8 +103,17 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                 }
             }
 
+            // 统计数据从实际报备记录计算
             item {
-                QuickStatsCard(items = listOf("今日运单" to "12", "总里程" to "2,486km", "准时率" to "98%"), backgroundColor = TruckOrange)
+                val todayReports = reports.size.toString()
+                QuickStatsCard(
+                    items = listOf(
+                        "今日报备" to todayReports,
+                        "待处理" to reports.count { it.status == "pending" }.toString(),
+                        "已完成" to reports.count { it.status == "completed" }.toString()
+                    ),
+                    backgroundColor = TruckOrange
+                )
             }
 
             item {
@@ -665,11 +670,12 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             text = "绑定车辆",
             onClick = {
                 viewModel?.bindVehicle(
-                    plateNumber,
-                    vehicleType,
-                    heightM.toDoubleOrNull(),
-                    weightT.toDoubleOrNull(),
-                    axleCount.replace("+", "").toIntOrNull()
+                    plateNumber = plateNumber,
+                    vehicleType = vehicleType,
+                    brand = "",
+                    heightM = heightM.toDoubleOrNull(),
+                    weightT = weightT.toDoubleOrNull(),
+                    axleCount = axleCount.replace("+", "").toIntOrNull()
                 )
             },
             isLoading = isLoading,
@@ -2342,7 +2348,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     var description by remember { mutableStateOf("") }
     val reportState by viewModel?.reportState?.collectAsState() ?: remember { mutableStateOf(ReportState.Idle) }
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
-    var selectedVehicleId by remember { mutableStateOf("") }
+    var selectedVehicleId by remember { mutableStateOf(-1) }
     val isLoading = reportState is ReportState.Loading
     val coroutineScope = rememberCoroutineScope()
     // ========== 语音识别相关状态 ==========
@@ -2582,7 +2588,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         items(validVehicles) { vehicle ->
                             FilterChip(
                                 selected = selectedVehicleId == vehicle.vehicleId,
-                                onClick = { selectedVehicleId = vehicle.vehicleId ?: "" },
+                                onClick = { selectedVehicleId = vehicle.vehicleId },
                                 label = { Text(vehicle.plateNumber) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = TruckOrange.copy(alpha = 0.2f),
@@ -2820,7 +2826,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                 )
             },
             isLoading = isLoading,
-            enabled = selectedVehicleId.isNotBlank() && destination.isNotBlank(),
+            enabled = selectedVehicleId != -1 && destination.isNotBlank(),
             backgroundColor = TruckOrange,
             icon = Icons.Rounded.Send
         )

@@ -63,36 +63,36 @@ fun LocationShareScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { Repository(context) }
-    
+
     // ==================== 状态 ====================
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    
+
     // 我的位置
     var myLocation by remember { mutableStateOf<LatLng?>(null) }
     var myAddress by remember { mutableStateOf("正在获取位置...") }
-    
+
     // 对方位置（查看模式）
     var otherLocation by remember { mutableStateOf<LatLng?>(null) }
     var lastUpdateTime by remember { mutableStateOf<String?>(null) }
-    
+
     // 共享信息
     var shareInfo by remember { mutableStateOf<LocationShareResponse?>(null) }
     var shareDetail by remember { mutableStateOf<LocationShareDetail?>(null) }
     var isSharing by remember { mutableStateOf(false) }
-    
+
     // 停止共享确认对话框
     var showStopDialog by remember { mutableStateOf(false) }
-    
+
     // 地图相关
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
     var myMarker by remember { mutableStateOf<Marker?>(null) }
     var otherMarker by remember { mutableStateOf<Marker?>(null) }
     var routePolyline by remember { mutableStateOf<Polyline?>(null) }
-    
+
     // WebSocket管理器（使用Mock）
-    val webSocketManager = remember { 
+    val webSocketManager = remember {
         if (Repository.USE_LOCAL_MOCK) {
             MockWebSocketManager()
         } else {
@@ -106,27 +106,27 @@ fun LocationShareScreen(
             null
         }
     }
-    
+
     // 位置客户端
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
-    
+
     // 权限请求
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        
+
         if (fineLocationGranted || coarseLocationGranted) {
             // 权限获取成功，开始定位
             startLocation(context, locationClient) { location ->
                 myLocation = LatLng(location.latitude, location.longitude)
                 myAddress = location.address ?: "位置已获取"
-                
+
                 // 更新地图
                 aMap?.let { map ->
                     updateMyMarker(map, myLocation!!, myMarker) { myMarker = it }
-                    
+
                     // 如果是发起共享模式且正在共享，发送位置
                     if (mode == "share" && isSharing) {
                         if (Repository.USE_LOCAL_MOCK) {
@@ -139,23 +139,23 @@ fun LocationShareScreen(
             }
         }
     }
-    
+
     // 收集WebSocket位置更新（查看模式）
     LaunchedEffect(mode) {
         if (mode == "view") {
             val wsManager = if (Repository.USE_LOCAL_MOCK) webSocketManager else realWebSocketManager
-            
+
             wsManager?.let { manager ->
                 when (manager) {
                     is MockWebSocketManager -> {
                         manager.locationUpdates.collect { locationMsg ->
                             otherLocation = LatLng(locationMsg.latitude, locationMsg.longitude)
                             lastUpdateTime = locationMsg.timestamp
-                            
+
                             // 更新地图上的对方标记
                             aMap?.let { map ->
                                 updateOtherMarker(map, otherLocation!!, otherMarker) { otherMarker = it }
-                                
+
                                 // 如果两个位置都有，绘制路线
                                 if (myLocation != null && otherLocation != null) {
                                     drawRoute(map, myLocation!!, otherLocation!!, routePolyline) { routePolyline = it }
@@ -167,10 +167,10 @@ fun LocationShareScreen(
                         manager.locationUpdates.collect { locationMsg ->
                             otherLocation = LatLng(locationMsg.latitude, locationMsg.longitude)
                             lastUpdateTime = locationMsg.timestamp
-                            
+
                             aMap?.let { map ->
                                 updateOtherMarker(map, otherLocation!!, otherMarker) { otherMarker = it }
-                                
+
                                 if (myLocation != null && otherLocation != null) {
                                     drawRoute(map, myLocation!!, otherLocation!!, routePolyline) { routePolyline = it }
                                 }
@@ -182,7 +182,7 @@ fun LocationShareScreen(
             }
         }
     }
-    
+
     // 初始化
     LaunchedEffect(Unit) {
         // 检查并请求位置权限
@@ -197,7 +197,7 @@ fun LocationShareScreen(
                 ))
             }
         }
-        
+
         // 根据模式初始化
         when (mode) {
             "share" -> {
@@ -208,7 +208,7 @@ fun LocationShareScreen(
                         is NetworkResult.Success -> {
                             shareInfo = result.data
                             isSharing = true
-                            
+
                             // 连接WebSocket开始上报位置
                             if (Repository.USE_LOCAL_MOCK) {
                                 webSocketManager?.connect(result.data.shareId)
@@ -234,7 +234,7 @@ fun LocationShareScreen(
                     when (val result = repository.getLocationShareDetail(id)) {
                         is NetworkResult.Success -> {
                             shareDetail = result.data
-                            
+
                             // 连接WebSocket接收位置
                             if (Repository.USE_LOCAL_MOCK) {
                                 webSocketManager?.connect(id)
@@ -255,7 +255,7 @@ fun LocationShareScreen(
             }
         }
     }
-    
+
     // 清理
     DisposableEffect(Unit) {
         onDispose {
@@ -266,7 +266,7 @@ fun LocationShareScreen(
             mapView?.onDestroy()
         }
     }
-    
+
     // ==================== UI ====================
     Scaffold(
         topBar = {
@@ -318,22 +318,22 @@ fun LocationShareScreen(
                                 isMyLocationButtonEnabled = false
                                 isCompassEnabled = true
                             }
-                            
+
                             // 设置初始位置（长沙）
                             moveCamera(CameraUpdateFactory.newLatLngZoom(
                                 LatLng(28.194, 113.005), 14f
                             ))
                         }
-                        
+
                         // 初始化定位
                         initLocationClient(ctx) { client ->
                             locationClient = client
-                            
+
                             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                                 startLocation(ctx, client) { location ->
                                     myLocation = LatLng(location.latitude, location.longitude)
                                     myAddress = location.address ?: "位置已获取"
-                                    
+
                                     this.map.let { map ->
                                         updateMyMarker(map, myLocation!!, myMarker) { myMarker = it }
                                         map.moveCamera(CameraUpdateFactory.newLatLngZoom(myLocation!!, 15f))
@@ -345,7 +345,7 @@ fun LocationShareScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
-            
+
             // 底部信息卡片
             Column(
                 modifier = Modifier
@@ -441,7 +441,7 @@ fun LocationShareScreen(
             }
         }
     }
-    
+
     // 停止共享确认对话框
     if (showStopDialog) {
         AlertDialog(
@@ -453,7 +453,7 @@ fun LocationShareScreen(
                     onClick = {
                         showStopDialog = false
                         scope.launch {
-                            shareInfo?.shareId?.let { id ->
+                            tripId?.let { id ->
                                 repository.stopLocationShare(id)
                             }
                             webSocketManager?.disconnect()
@@ -509,9 +509,9 @@ private fun ShareModeCard(
                     fontSize = 14.sp
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 分享码
             Text(
                 text = "分享码",
@@ -545,9 +545,9 @@ private fun ShareModeCard(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             // 我的位置
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -564,7 +564,7 @@ private fun ShareModeCard(
                     maxLines = 1
                 )
             }
-            
+
             // 有效期
             shareInfo.expiredAt?.let { expired ->
                 Spacer(modifier = Modifier.height(4.dp))
@@ -583,9 +583,9 @@ private fun ShareModeCard(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 分享按钮
             Button(
                 onClick = {
@@ -604,9 +604,9 @@ private fun ShareModeCard(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("发送给好友")
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 text = "💡 让对方打开APP → 我的行程 → 加入位置共享，输入分享码即可",
                 color = TextTertiary,
@@ -683,7 +683,7 @@ private fun ViewModeCard(
                     }
                 }
             }
-            
+
             // 行程信息
             shareDetail.tripInfo?.let { trip ->
                 Spacer(modifier = Modifier.height(12.dp))
@@ -709,14 +709,14 @@ private fun ViewModeCard(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 距离和预计时间
             if (myLocation != null && otherLocation != null) {
                 val distance = calculateDistance(myLocation, otherLocation)
                 val estimatedTime = (distance / 500).toInt() // 简单估算，假设500米/分钟
-                
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
@@ -734,14 +734,14 @@ private fun ViewModeCard(
                             fontSize = 13.sp
                         )
                     }
-                    
+
                     Box(
                         modifier = Modifier
                             .width(1.dp)
                             .height(40.dp)
                             .background(DividerColor)
                     )
-                    
+
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "${estimatedTime.coerceAtLeast(1)}分钟",
@@ -756,10 +756,10 @@ private fun ViewModeCard(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
             }
-            
+
             // 最后更新时间
             lastUpdateTime?.let { time ->
                 Text(
@@ -771,7 +771,7 @@ private fun ViewModeCard(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
-            
+
             // 导航按钮
             Button(
                 onClick = onNavigate,
@@ -794,7 +794,7 @@ private fun initLocationClient(context: Context, onCreated: (AMapLocationClient)
     try {
         AMapLocationClient.updatePrivacyShow(context, true, true)
         AMapLocationClient.updatePrivacyAgree(context, true)
-        
+
         val client = AMapLocationClient(context)
         val option = AMapLocationClientOption().apply {
             locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
@@ -828,7 +828,7 @@ private fun updateMyMarker(
     onMarkerCreated: (Marker) -> Unit
 ) {
     existingMarker?.remove()
-    
+
     val marker = map.addMarker(MarkerOptions()
         .position(location)
         .title("我的位置")
@@ -844,14 +844,14 @@ private fun updateOtherMarker(
     onMarkerCreated: (Marker) -> Unit
 ) {
     existingMarker?.remove()
-    
+
     val marker = map.addMarker(MarkerOptions()
         .position(location)
         .title("对方位置")
         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
     )
     onMarkerCreated(marker)
-    
+
     // 调整地图视野包含两个点
     map.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 14f))
 }
@@ -864,7 +864,7 @@ private fun drawRoute(
     onPolylineCreated: (Polyline) -> Unit
 ) {
     existingPolyline?.remove()
-    
+
     // 简单的直线连接（实际可以调用高德路线规划API）
     val polyline = map.addPolyline(PolylineOptions()
         .add(start, end)
@@ -873,7 +873,7 @@ private fun drawRoute(
         .setDottedLine(true)
     )
     onPolylineCreated(polyline)
-    
+
     // 调整视野包含两个点
     val boundsBuilder = LatLngBounds.Builder()
     boundsBuilder.include(start)

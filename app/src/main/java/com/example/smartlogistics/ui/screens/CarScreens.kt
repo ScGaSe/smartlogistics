@@ -1,10 +1,14 @@
 package com.example.smartlogistics.ui.screens
 
-import CongestionDataPoint
-import CongestionDetailCard
-import TTITrendChart
-import TimeRangeSelector
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -25,58 +29,38 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import kotlinx.coroutines.delay
-import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.ui.layout.ContentScale
-import android.graphics.BitmapFactory
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.Image
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.foundation.layout.offset
-import kotlinx.coroutines.delay
-import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.lazy.LazyRow
-import android.content.Intent
-import android.widget.Toast
-import androidx.navigation.NavController
-import com.example.smartlogistics.ui.components.*
-import com.example.smartlogistics.ui.theme.*
-import com.example.smartlogistics.viewmodel.MainViewModel
-import com.example.smartlogistics.viewmodel.VehicleState
-import com.example.smartlogistics.viewmodel.TripState
-import java.net.URLEncoder
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.graphics.Bitmap
-import kotlinx.coroutines.*
-import com.example.smartlogistics.utils.TFLiteHelper
-import com.example.smartlogistics.utils.CameraUtils
-import generateMockCongestionData
-import com.amap.api.maps.AMap
-import com.amap.api.maps.CameraUpdateFactory
-import com.amap.api.maps.model.LatLng
+import androidx.navigation.NavController
+import coil.compose.rememberAsyncImagePainter
 import com.amap.api.location.AMapLocation
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.model.LatLng
+import com.example.smartlogistics.ui.components.*
+import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.utils.ParkingManager
-import kotlinx.coroutines.delay
+import com.example.smartlogistics.utils.TFLiteHelper
+import com.example.smartlogistics.viewmodel.MainViewModel
+import com.example.smartlogistics.viewmodel.TripState
+import com.example.smartlogistics.viewmodel.VehicleState
+import kotlinx.coroutines.*
 import java.io.File
-import coil.compose.rememberAsyncImagePainter
-import getTTILevel
+import java.net.URLEncoder
 
 // ==================== 行程OCR识别结果数据类 ====================
 data class TripOcrResult(
@@ -153,13 +137,15 @@ fun CarHomeScreen(
                 }
             }
 
-            // 快捷统计
+            // 快捷统计 - 从实际行程数据计算
             item {
+                val totalTrips = trips.size.toString()
+                val vehicleCount = vehicles.size.toString()
                 QuickStatsCard(
                     items = listOf(
-                        "本月行程" to "28",
-                        "总里程" to "486km",
-                        "导航次数" to "15"
+                        "我的行程" to totalTrips,
+                        "绑定车辆" to vehicleCount,
+                        "活跃行程" to trips.count { it.status == "active" || it.status == "scheduled" }.toString()
                     ),
                     backgroundColor = CarGreen
                 )
@@ -730,8 +716,16 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(text = "车辆类型", fontSize = 14.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
+                // 第一行：轿车、SUV
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    listOf("sedan" to "轿车", "suv" to "SUV", "mpv" to "MPV").forEach { (type, label) ->
+                    listOf("sedan" to "轿车", "suv" to "SUV").forEach { (type, label) ->
+                        FilterChip(selected = vehicleType == type, onClick = { vehicleType = type }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CarGreen.copy(alpha = 0.2f), selectedLabelColor = CarGreen))
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                // 第二行：客车、小型客车
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf("bus" to "客车", "minibus" to "小型客车").forEach { (type, label) ->
                         FilterChip(selected = vehicleType == type, onClick = { vehicleType = type }, label = { Text(label) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CarGreen.copy(alpha = 0.2f), selectedLabelColor = CarGreen))
                     }
                 }
@@ -1408,9 +1402,9 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         // 导航按钮
         PrimaryButton(
             text = "开始导航",
-            onClick = { 
+            onClick = {
                 val encodedDest = Uri.encode(destination)
-                navController.navigate("navigation_map?destination=$encodedDest") 
+                navController.navigate("navigation_map?destination=$encodedDest")
             },
             enabled = destination.isNotBlank(),
             backgroundColor = CarGreen,
@@ -1651,7 +1645,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
     var showDetailDialog by remember { mutableStateOf(false) }
     var aMapInstance by remember { mutableStateOf<AMap?>(null) }
     var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
-    
+
     // 模拟路段数据（后端接入后替换为真实数据）
     val roadSegments = remember {
         listOf(
@@ -1664,7 +1658,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
             RoadSegment("7", "城市快速路匝道", "1.5km", "约8分钟", RoadCongestionLevel.MODERATE, "匝道汇入口拥堵，请提前变道", "22km/h")
         )
     }
-    
+
     // 刷新数据
     val scope = rememberCoroutineScope()
     fun refreshData() {
@@ -1675,7 +1669,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
             isRefreshing = false
         }
     }
-    
+
     // 定位到当前位置
     fun locateToCurrentPosition() {
         currentLocation?.let { location ->
@@ -1711,7 +1705,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                             tint = TextPrimary
                         )
                     }
-                    
+
                     // 标题
                     Text(
                         text = "道路实况",
@@ -1721,7 +1715,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
-                    
+
                     // 刷新按钮
                     IconButton(
                         onClick = { refreshData() },
@@ -1781,7 +1775,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                             }
                         }
                     )
-                    
+
                     // 定位按钮
                     FloatingActionButton(
                         onClick = { locateToCurrentPosition() },
@@ -1802,7 +1796,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                             modifier = Modifier.size(22.dp)
                         )
                     }
-                    
+
                     // 更新时间标签
                     Surface(
                         modifier = Modifier
@@ -1831,7 +1825,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         }
                     }
                 }
-                
+
                 // 路况图例
                 Card(
                     modifier = Modifier
@@ -1853,7 +1847,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         CarTrafficLegendItem(color = CongestionSevere, label = "严重")
                     }
                 }
-                
+
                 // 路段列表标题
                 Row(
                     modifier = Modifier
@@ -1874,7 +1868,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         color = TextSecondary
                     )
                 }
-                
+
                 // 路段列表
                 LazyColumn(
                     modifier = Modifier
@@ -1896,7 +1890,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
             }
         }
     }
-    
+
     // 路段详情弹窗
     if (showDetailDialog && selectedSegment != null) {
         RoadSegmentDetailDialog(
@@ -1942,9 +1936,9 @@ private fun RoadSegmentCard(
                         shape = RoundedCornerShape(2.dp)
                     )
             )
-            
+
             Spacer(modifier = Modifier.width(12.dp))
-            
+
             // 路段信息
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -1984,7 +1978,7 @@ private fun RoadSegmentCard(
                     )
                 }
             }
-            
+
             // 拥堵状态标签
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -1998,9 +1992,9 @@ private fun RoadSegmentCard(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(8.dp))
-            
+
             // 箭头指示
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -2052,9 +2046,9 @@ private fun RoadSegmentDetailDialog(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 路段名称和状态
                 Row(
                     verticalAlignment = Alignment.CenterVertically
@@ -2075,17 +2069,17 @@ private fun RoadSegmentDetailDialog(
                         color = TextPrimary
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 详情信息
                 DetailInfoRow(label = "当前状态", value = segment.congestionLevel.label, valueColor = segment.congestionLevel.textColor)
                 DetailInfoRow(label = "路段长度", value = segment.distance)
                 DetailInfoRow(label = "预计用时", value = segment.estimatedTime)
                 DetailInfoRow(label = "平均车速", value = segment.avgSpeed)
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
+
                 // 路况描述
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -2111,9 +2105,9 @@ private fun RoadSegmentDetailDialog(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(20.dp))
-                
+
                 // 导航按钮
                 Button(
                     onClick = { onNavigate(segment) },
@@ -2206,7 +2200,6 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
     LaunchedEffect(selectedTimeRange) {
         isLoading = true
         viewModel?.predictCongestion(roadId = "airport_expressway", hours = predictHours)
-        viewModel?.fetchAllParking()
         kotlinx.coroutines.delay(800)
         isLoading = false
     }
@@ -2884,42 +2877,42 @@ private fun CarHistoryRecordCard(
 fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
     var tripType by remember { mutableStateOf("flight") }
     var tripNumber by remember { mutableStateOf("") }
     var tripDate by remember { mutableStateOf("") }
     val tripState by viewModel?.tripState?.collectAsState() ?: remember { mutableStateOf(TripState.Idle) }
     val trips by viewModel?.trips?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val isLoading = tripState is TripState.Loading
-    
+
     // ==================== 图片识别相关状态 ====================
     var showImagePickerDialog by remember { mutableStateOf(false) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<TripOcrResult?>(null) }
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    
+
     // ==================== 位置共享相关状态 ====================
     var showJoinShareDialog by remember { mutableStateOf(false) }
     var joinShareId by remember { mutableStateOf("") }
     var isJoiningShare by remember { mutableStateOf(false) }
     var shareError by remember { mutableStateOf<String?>(null) }
-    
+
     // ==================== OCR识别开关 ====================
     // true = 使用模拟数据（无需百度API）
     // false = 调用百度OCR真实识别
     val USE_MOCK_OCR = false  // ★ 已启用真实识别
-    
+
     // 执行OCR识别
     fun performOcrRecognition(imageUri: Uri, currentTripType: String) {
         isRecognizing = true
         recognitionResult = null
-        
+
         scope.launch {
             if (USE_MOCK_OCR) {
                 // ==================== Mock模式：返回模拟数据 ====================
                 delay(1500) // 模拟识别过程
-                
+
                 val mockResult = if (currentTripType == "flight") {
                     TripOcrResult(
                         tripType = "flight",
@@ -2945,13 +2938,13 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         confidence = 0.93f
                     )
                 }
-                
+
                 recognitionResult = mockResult
                 tripNumber = mockResult.tripNumber
                 tripDate = mockResult.tripDate
                 tripType = mockResult.tripType
                 isRecognizing = false
-                
+
             } else {
                 // ==================== 真实模式：调用百度OCR ====================
                 try {
@@ -2960,7 +2953,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         imageUri = imageUri,
                         tripType = currentTripType
                     )
-                    
+
                     if (ocrResult.success) {
                         val result = TripOcrResult(
                             tripType = ocrResult.tripType,
@@ -2973,7 +2966,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             seatInfo = ocrResult.seatInfo,
                             confidence = 0.95f
                         )
-                        
+
                         recognitionResult = result
                         tripNumber = result.tripNumber
                         tripDate = result.tripDate
@@ -2990,7 +2983,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             }
         }
     }
-    
+
     // 相机拍照
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
@@ -3000,7 +2993,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             performOcrRecognition(cameraPhotoUri!!, tripType)
         }
     }
-    
+
     // 相册选择
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -3010,7 +3003,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             performOcrRecognition(it, tripType)
         }
     }
-    
+
     // 相机权限
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -3021,7 +3014,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             cameraLauncher.launch(uri)
         }
     }
-    
+
     DetailScreenTemplate(navController = navController, title = "我的行程", backgroundColor = BackgroundPrimary) {
         // ==================== 加入位置共享 ====================
         Card(
@@ -3070,9 +3063,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Button(
                     onClick = { showJoinShareDialog = true },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -3085,9 +3078,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // ==================== 已关联行程 ====================
         val validTrips = trips.filter { it.tripNumber.isNotBlank() && !it.tripNumber.contains("string", ignoreCase = true) }
         if (validTrips.isNotEmpty()) {
@@ -3106,7 +3099,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "日期: ${trip.tripDate}", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
-                        
+
                         // 共享位置按钮
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
@@ -3139,11 +3132,11 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             }
             Spacer(modifier = Modifier.height(20.dp))
         }
-        
+
         // ==================== 智能识别卡片 ====================
         Text(text = "智能识别", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
-        
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -3168,9 +3161,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         Text(text = "拍摄机票、火车票自动识别信息", fontSize = 13.sp, color = TextSecondary)
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 图片预览区域
                 if (selectedImageUri != null) {
                     Box(
@@ -3187,7 +3180,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
-                        
+
                         if (isRecognizing) {
                             Box(
                                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)),
@@ -3200,7 +3193,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                                 }
                             }
                         }
-                        
+
                         if (!isRecognizing) {
                             IconButton(
                                 onClick = { selectedImageUri = null; recognitionResult = null; tripNumber = ""; tripDate = "" },
@@ -3210,11 +3203,11 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             }
                         }
                     }
-                    
+
                     // 识别结果展示
                     if (recognitionResult != null) {
                         Spacer(modifier = Modifier.height(12.dp))
-                        
+
                         Row(
                             modifier = Modifier.fillMaxWidth().background(SuccessGreenLight, RoundedCornerShape(8.dp)).padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -3223,9 +3216,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(text = "识别成功！", fontSize = 14.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
                         }
-                        
+
                         Spacer(modifier = Modifier.height(12.dp))
-                        
+
                         // 识别详情卡片
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -3249,9 +3242,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                                         )
                                     }
                                 }
-                                
+
                                 Spacer(modifier = Modifier.height(16.dp))
-                                
+
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Column(horizontalAlignment = Alignment.Start) {
                                         Text(text = recognitionResult!!.departureCity ?: "--", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
@@ -3266,7 +3259,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                                         Text(text = "预计到达", fontSize = 14.sp, color = TextSecondary)
                                     }
                                 }
-                                
+
                                 if (recognitionResult!!.passengerName != null || recognitionResult!!.seatInfo != null) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     HorizontalDivider(color = DividerColor)
@@ -3290,14 +3283,14 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                                 }
                             }
                         }
-                        
+
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "💡 信息已自动填充到下方表单", fontSize = 12.sp, color = TextTertiary, modifier = Modifier.padding(horizontal = 4.dp))
                     }
-                    
+
                     Spacer(modifier = Modifier.height(12.dp))
                 }
-                
+
                 // 拍照/相册按钮
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(
@@ -3311,7 +3304,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(text = "拍照识别", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
-                    
+
                     OutlinedButton(
                         onClick = { galleryLauncher.launch("image/*") },
                         modifier = Modifier.weight(1f).height(48.dp),
@@ -3326,13 +3319,13 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // ==================== 手动添加行程 ====================
         Text(text = "手动添加", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
-        
+
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf("flight" to "航班" to Icons.Rounded.Flight, "train" to "火车" to Icons.Rounded.Train).forEach { (typeLabel, icon) ->
                 val (type, label) = typeLabel
@@ -3345,9 +3338,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(modifier = Modifier.padding(20.dp)) {
                 StyledTextField(value = tripNumber, onValueChange = { tripNumber = it.uppercase() }, label = if (tripType == "flight") "航班号 (如 MU5521)" else "车次号 (如 G1234)", leadingIcon = if (tripType == "flight") Icons.Rounded.Flight else Icons.Rounded.Train)
@@ -3355,11 +3348,11 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 StyledTextField(value = tripDate, onValueChange = { tripDate = it }, label = "出发日期 (如 2025-01-20)", leadingIcon = Icons.Rounded.CalendarToday)
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
         PrimaryButton(text = "关联行程", onClick = { viewModel?.createTrip(tripType, tripNumber, tripDate) }, isLoading = isLoading, enabled = tripNumber.isNotBlank() && tripDate.isNotBlank(), backgroundColor = CarGreen, icon = Icons.Rounded.Add)
     }
-    
+
     // ==================== 图片来源选择对话框 ====================
     if (showImagePickerDialog) {
         AlertDialog(
@@ -3389,9 +3382,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             Text(text = "使用相机拍摄票据", fontSize = 13.sp, color = TextSecondary)
                         }
                     }
-                    
+
                     HorizontalDivider(color = DividerColor)
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable {
                             showImagePickerDialog = false
@@ -3414,21 +3407,21 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             dismissButton = { TextButton(onClick = { showImagePickerDialog = false }) { Text("取消", color = TextSecondary) } }
         )
     }
-    
+
     // ==================== 加入位置共享对话框 ====================
     if (showJoinShareDialog) {
         AlertDialog(
-            onDismissRequest = { 
+            onDismissRequest = {
                 showJoinShareDialog = false
                 joinShareId = ""
                 shareError = null
             },
-            title = { 
+            title = {
                 Text(
-                    text = "加入位置共享", 
+                    text = "加入位置共享",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 18.sp
-                ) 
+                )
             },
             text = {
                 Column {
@@ -3438,10 +3431,10 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         color = TextSecondary,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
-                    
+
                     OutlinedTextField(
                         value = joinShareId,
-                        onValueChange = { 
+                        onValueChange = {
                             joinShareId = it.uppercase().take(8)
                             shareError = null
                         },
@@ -3456,7 +3449,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             unfocusedBorderColor = DividerColor
                         )
                     )
-                    
+
                     if (shareError != null) {
                         Text(
                             text = shareError!!,
@@ -3465,9 +3458,9 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Text(
                         text = "💡 分享码由对方在「共享实时位置」时生成",
                         fontSize = 12.sp,
@@ -3504,14 +3497,14 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                     Text("加入")
                 }
             },
-            dismissButton = { 
-                TextButton(onClick = { 
+            dismissButton = {
+                TextButton(onClick = {
                     showJoinShareDialog = false
                     joinShareId = ""
                     shareError = null
-                }) { 
-                    Text("取消", color = TextSecondary) 
-                } 
+                }) {
+                    Text("取消", color = TextSecondary)
+                }
             }
         )
     }

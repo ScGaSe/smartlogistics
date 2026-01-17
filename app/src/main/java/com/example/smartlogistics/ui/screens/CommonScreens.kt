@@ -875,7 +875,7 @@ fun AiResultScreen(
 
     LaunchedEffect(aiResponse) {
         aiResponse?.let {
-            val answerText = it.answer ?: it.data?.answer ?: "抱歉，无法获取回答"
+            val answerText = it.data?.answer ?: "抱歉，无法获取回答"
             chatHistory = chatHistory + (false to answerText)
         }
     }
@@ -1290,7 +1290,7 @@ fun UserProfileScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = userInfo?.userName ?: viewModel?.getUserName() ?: "用户",
+                    text = userInfo?.nickname ?: viewModel?.getUserName() ?: "用户",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White

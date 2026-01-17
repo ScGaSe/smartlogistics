@@ -1,3 +1,5 @@
+package com.example.smartlogistics.ui.components
+
 // =====================================================
 // 拥堵预测图表组件
 // =====================================================
@@ -25,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.smartlogistics.network.CongestionData
+import com.example.smartlogistics.network.CongestionPrediction
 
 // ==================== 拥堵数据模型 ====================
 data class CongestionDataPoint(
@@ -50,29 +54,51 @@ fun getTTILevel(tti: Float): CongestionLevel {
     }
 }
 
-// ==================== 生成模拟数据 ====================
-fun generateMockCongestionData(): List<CongestionDataPoint> {
-    val timeSlots = listOf(
-        "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
-        "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
-        "18:00", "19:00", "20:00", "21:00", "22:00"
-    )
+// ==================== 从API响应转换数据 ====================
 
-    // 模拟一天的TTI变化（早晚高峰拥堵）
-    val ttiValues = listOf(
-        1.1f, 1.4f, 1.9f, 1.7f, 1.3f, 1.2f,  // 早高峰
-        1.3f, 1.2f, 1.3f, 1.5f, 1.8f, 2.2f,  // 晚高峰开始
-        2.0f, 1.6f, 1.3f, 1.2f, 1.1f         // 晚间
-    )
+/**
+ * 将后端返回的拥堵预测数据转换为图表数据点
+ * @param congestionData 后端返回的CongestionData
+ * @return 图表数据点列表
+ */
+fun convertApiDataToCongestionPoints(congestionData: CongestionData?): List<CongestionDataPoint> {
+    if (congestionData == null) return emptyList()
 
-    return timeSlots.mapIndexed { index, time ->
-        val tti = ttiValues[index]
+    val dataPoints = mutableListOf<CongestionDataPoint>()
+
+    // 添加当前TTI数据点
+    val currentTime = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date())
+    dataPoints.add(
         CongestionDataPoint(
-            time = time,
-            ttiIndex = tti,
-            level = getTTILevel(tti)
+            time = currentTime,
+            ttiIndex = congestionData.currentTti,
+            level = getTTILevel(congestionData.currentTti)
+        )
+    )
+
+    // 添加预测数据点
+    congestionData.predictions?.forEach { prediction ->
+        dataPoints.add(
+            CongestionDataPoint(
+                time = prediction.time,
+                ttiIndex = prediction.tti,
+                level = getTTILevel(prediction.tti)
+            )
         )
     }
+
+    return dataPoints.sortedBy { it.time }
+}
+
+/**
+ * 生成占位数据（用于API加载前显示）
+ * 注意：这不是模拟数据，只是UI占位
+ */
+fun generatePlaceholderData(): List<CongestionDataPoint> {
+    return listOf(
+        CongestionDataPoint("--:--", 1.0f, CongestionLevel.FREE)
+    )
 }
 
 // ==================== TTI趋势图表（Compose Canvas） ====================
@@ -90,6 +116,24 @@ fun TTITrendChart(
         label = "chartAnimation"
     )
 
+    // 如果数据为空，显示提示
+    if (data.isEmpty()) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .background(Color(0xFFF8FAFC), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "暂无拥堵数据",
+                color = TextSecondary,
+                fontSize = 14.sp
+            )
+        }
+        return
+    }
+
     Column(modifier = modifier) {
         // 图表区域
         Box(
@@ -103,6 +147,21 @@ fun TTITrendChart(
                 val width = size.width
                 val height = size.height
                 val pointCount = data.size
+
+                if (pointCount < 2) {
+                    // 只有一个点时，绘制单点
+                    val point = data.first()
+                    val centerX = width / 2
+                    val centerY = height / 2
+
+                    drawCircle(
+                        color = point.level.color,
+                        radius = 8.dp.toPx(),
+                        center = Offset(centerX, centerY)
+                    )
+                    return@Canvas
+                }
+
                 val pointSpacing = width / (pointCount - 1)
 
                 // Y轴范围: TTI 1.0 - 2.5
@@ -125,7 +184,8 @@ fun TTITrendChart(
                 // 计算点位置
                 val points = data.mapIndexed { index, point ->
                     val x = index * pointSpacing
-                    val y = height - ((point.ttiIndex - minTTI) / ttiRange * height)
+                    val clampedTti = point.ttiIndex.coerceIn(minTTI, maxTTI)
+                    val y = height - ((clampedTti - minTTI) / ttiRange * height)
                     Offset(x, y * animatedProgress + height * (1 - animatedProgress))
                 }
 
@@ -218,7 +278,7 @@ fun TTITrendChart(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = point.time.substring(0, 5),
+                        text = point.time.take(5),  // 取前5个字符 "HH:mm"
                         fontSize = 10.sp,
                         color = if (index == selectedIndex) primaryColor else TextSecondary,
                         fontWeight = if (index == selectedIndex) FontWeight.Bold else FontWeight.Normal
@@ -381,6 +441,64 @@ fun RoadCongestionList(
     }
 }
 
-// 颜色常量（如果还没定义的话）
+// ==================== 加载状态组件 ====================
+@Composable
+fun CongestionLoadingState(
+    primaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .background(Color(0xFFF8FAFC), RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(32.dp),
+                color = primaryColor,
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "加载拥堵数据...",
+                color = TextSecondary,
+                fontSize = 14.sp
+            )
+        }
+    }
+}
+
+// ==================== 错误状态组件 ====================
+@Composable
+fun CongestionErrorState(
+    errorMessage: String,
+    onRetry: () -> Unit,
+    primaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .background(Color(0xFFF8FAFC), RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = errorMessage,
+                color = TextSecondary,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onRetry) {
+                Text("重试", color = primaryColor)
+            }
+        }
+    }
+}
+
+// 颜色常量
 private val TextPrimary = Color(0xFF1F2937)
 private val TextSecondary = Color(0xFF6B7280)
