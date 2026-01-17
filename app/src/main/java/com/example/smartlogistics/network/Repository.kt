@@ -1,33 +1,124 @@
 package com.example.smartlogistics.network
 
 import android.content.Context
-import android.net.Uri
+import android.util.Log
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import retrofit2.Response
 import java.io.File
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 /**
  * 数据仓库
  * 封装所有网络请求逻辑
+ *
+ * 修复记录：
+ * - 2026-01-17: 改进错误处理，添加友好错误信息
+ * - 2026-01-17: 修复 WebSocket 地址硬编码问题
+ * - 2026-01-17: 添加统一错误解析方法
  */
 class Repository(private val context: Context) {
 
-    private val api: ApiService = RetrofitClient.apiService
-    private val tokenManager = TokenManager(context)
-
     companion object {
+        private const val TAG = "Repository"
+
         // ★★★ 本地Mock开关 ★★★
         // true = 不走网络，用本地假数据（后端未启动时用）
         // false = 正常走网络请求（对接后端时设为false）
         // ⚠️ 对接后端前，请将此开关设为 false
-        var USE_LOCAL_MOCK = false
+        var USE_LOCAL_MOCK = true
+    }
+
+    private val api: ApiService = RetrofitClient.apiService
+    private val tokenManager = TokenManager(context)
+
+    // ==================== 辅助方法 ====================
+
+    /**
+     * 将技术性异常转换为用户友好的错误信息
+     */
+    private fun getFriendlyErrorMessage(e: Throwable): String {
+        return when (e) {
+            is ConnectException ->
+                "无法连接服务器，请检查:\n1. 手机和电脑是否在同一WiFi\n2. 后端服务是否已启动\n3. IP地址是否正确"
+            is SocketTimeoutException ->
+                "连接超时，请检查网络后重试"
+            is UnknownHostException ->
+                "无法解析服务器地址，请检查网络设置"
+            is javax.net.ssl.SSLException ->
+                "安全连接失败，请检查网络设置"
+            is java.io.IOException ->
+                "网络通信异常: ${e.localizedMessage ?: "请稍后重试"}"
+            else ->
+                "网络错误: ${e.localizedMessage ?: "未知错误"}"
+        }
+    }
+
+    /**
+     * 统一解析错误响应
+     * @param response Retrofit Response
+     * @param defaultMessage 默认错误消息
+     */
+    private fun <T> parseErrorResponse(response: Response<T>, defaultMessage: String): String {
+        val errorBody = response.errorBody()?.string()
+
+        // 根据HTTP状态码给出友好提示
+        val statusMessage = when (response.code()) {
+            400 -> "请求参数错误"
+            401 -> "账号或密码错误"
+            403 -> "无访问权限"
+            404 -> "请求的服务不存在"
+            409 -> "数据冲突（可能已存在）"
+            422 -> "数据验证失败"
+            500 -> "服务器内部错误，请稍后重试"
+            502, 503, 504 -> "服务暂时不可用，请稍后重试"
+            else -> null
+        }
+
+        // 尝试解析后端返回的具体错误信息
+        val detailMessage = try {
+            val errorJson = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
+            errorJson?.detail ?: errorJson?.message
+        } catch (e: Exception) {
+            null
+        }
+
+        // 优先使用后端返回的详细信息，其次用状态码对应的信息，最后用默认信息
+        return detailMessage ?: statusMessage ?: "$defaultMessage (${response.code()})"
+    }
+
+    /**
+     * 安全执行网络请求
+     */
+    private inline fun <T> safeApiCall(
+        defaultErrorMsg: String,
+        call: () -> Response<T>
+    ): NetworkResult<T> {
+        return try {
+            val response = call()
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                val errorMsg = parseErrorResponse(response, defaultErrorMsg)
+                Log.w(TAG, "$defaultErrorMsg: $errorMsg")
+                NetworkResult.Error(errorMsg)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "$defaultErrorMsg: ${e.message}", e)
+            val friendlyMessage = getFriendlyErrorMessage(e)
+            NetworkResult.Error(friendlyMessage)
+        }
     }
 
     // ==================== 认证相关 ====================
 
     suspend fun register(phoneNumber: String, password: String, role: String): NetworkResult<RegisterResponse> {
+        Log.d(TAG, "register: phone=$phoneNumber, role=$role")
+
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(RegisterResponse(
@@ -41,25 +132,24 @@ class Repository(private val context: Context) {
         return try {
             val response = api.register(RegisterRequest(phoneNumber, password, role))
             if (response.isSuccessful && response.body() != null) {
+                Log.d(TAG, "register success")
                 NetworkResult.Success(response.body()!!)
             } else {
-                // 解析错误响应
-                val errorBody = response.errorBody()?.string()
-                val errorMsg = try {
-                    val errorJson = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
-                    errorJson?.detail ?: errorJson?.message ?: "注册失败"
-                } catch (e: Exception) {
-                    errorBody ?: "注册失败: ${response.code()}"
-                }
+                val errorMsg = parseErrorResponse(response, "注册失败")
+                Log.w(TAG, "register failed: $errorMsg")
                 NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            NetworkResult.Exception(e)
+            Log.e(TAG, "register exception: ${e.message}", e)
+            val friendlyMessage = getFriendlyErrorMessage(e)
+            NetworkResult.Error(friendlyMessage)
         }
     }
 
     suspend fun login(phoneNumber: String, password: String): NetworkResult<LoginResponse> {
+        Log.d(TAG, "login: phone=$phoneNumber")
+        Log.d(TAG, "login: baseUrl=${RetrofitClient.getCurrentBaseUrl()}")
+
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             val fakeToken = "local_mock_token_${System.currentTimeMillis()}"
@@ -83,6 +173,7 @@ class Repository(private val context: Context) {
         }
 
         return try {
+            Log.d(TAG, "login: sending request...")
             val response = api.login(
                 username = phoneNumber,
                 password = password,
@@ -91,27 +182,26 @@ class Repository(private val context: Context) {
                 clientId = "string",
                 clientSecret = "string"
             )
+            Log.d(TAG, "login: response code=${response.code()}")
+
             if (response.isSuccessful && response.body() != null) {
                 val loginResponse = response.body()!!
+                Log.d(TAG, "login success: token=${loginResponse.accessToken.take(20)}...")
+
                 // 保存Token
                 tokenManager.saveToken(loginResponse.accessToken)
                 tokenManager.saveUserName(phoneNumber)
                 loginResponse.userInfo?.role?.let { tokenManager.saveUserRole(it) }
                 NetworkResult.Success(loginResponse)
             } else {
-                // 解析错误响应
-                val errorBody = response.errorBody()?.string()
-                val errorMsg = try {
-                    val errorJson = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
-                    errorJson?.detail ?: errorJson?.message ?: "登录失败"
-                } catch (e: Exception) {
-                    errorBody ?: "登录失败: ${response.code()}"
-                }
+                val errorMsg = parseErrorResponse(response, "登录失败")
+                Log.w(TAG, "login failed: $errorMsg")
                 NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            NetworkResult.Exception(e)
+            Log.e(TAG, "login exception: ${e.javaClass.simpleName}: ${e.message}", e)
+            val friendlyMessage = getFriendlyErrorMessage(e)
+            NetworkResult.Error(friendlyMessage)
         }
     }
 
@@ -141,15 +231,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getCurrentUser()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取用户信息失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取用户信息失败") {
+            api.getCurrentUser()
         }
     }
 
@@ -168,15 +251,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getVehicles()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取车辆列表失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取车辆列表失败") {
+            api.getVehicles()
         }
     }
 
@@ -207,10 +283,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("绑定车辆失败")
+                val errorMsg = parseErrorResponse(response, "绑定车辆失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -221,6 +298,7 @@ class Repository(private val context: Context) {
             val response = api.deleteVehicle(vehicleId.toInt())
             response.isSuccessful
         } catch (e: Exception) {
+            Log.e(TAG, "unbindVehicle failed: ${e.message}")
             false
         }
     }
@@ -238,15 +316,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getReports(page)
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取报备记录失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取报备记录失败") {
+            api.getReports(page)
         }
     }
 
@@ -274,7 +345,6 @@ class Repository(private val context: Context) {
         }
 
         return try {
-            // 使用新的请求格式
             val request = SubmitReportRequest(
                 vehicleId = vehicleId.toInt(),
                 cargoType = cargoType,
@@ -287,10 +357,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("提交报备失败")
+                val errorMsg = parseErrorResponse(response, "提交报备失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -302,15 +373,8 @@ class Repository(private val context: Context) {
             return NetworkResult.Success(emptyList())
         }
 
-        return try {
-            val response = api.getTrips()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取行程失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取行程失败") {
+            api.getTrips()
         }
     }
 
@@ -332,10 +396,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("创建行程失败")
+                val errorMsg = parseErrorResponse(response, "创建行程失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -356,10 +421,11 @@ class Repository(private val context: Context) {
                 val pois = response.body()!!.data?.pois ?: emptyList()
                 NetworkResult.Success(pois)
             } else {
-                NetworkResult.Error("获取POI失败")
+                val errorMsg = parseErrorResponse(response, "获取POI失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -378,10 +444,11 @@ class Repository(private val context: Context) {
                 val pois = response.body()!!.data?.pois ?: emptyList()
                 NetworkResult.Success(pois)
             } else {
-                NetworkResult.Error("获取附近POI失败")
+                val errorMsg = parseErrorResponse(response, "获取附近POI失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -404,10 +471,11 @@ class Repository(private val context: Context) {
                 val parkings = response.body()!!.data?.parkings ?: emptyList()
                 NetworkResult.Success(parkings)
             } else {
-                NetworkResult.Error("获取附近停车场失败")
+                val errorMsg = parseErrorResponse(response, "获取附近停车场失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -422,10 +490,11 @@ class Repository(private val context: Context) {
                 val parkings = response.body()!!.data?.parkings ?: emptyList()
                 NetworkResult.Success(parkings)
             } else {
-                NetworkResult.Error("获取停车场列表失败")
+                val errorMsg = parseErrorResponse(response, "获取停车场列表失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -443,10 +512,11 @@ class Repository(private val context: Context) {
                 val parkings = response.body()!!.data?.parkings ?: emptyList()
                 NetworkResult.Success(parkings)
             } else {
-                NetworkResult.Error("获取推荐停车场失败")
+                val errorMsg = parseErrorResponse(response, "获取推荐停车场失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -467,10 +537,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("开始停车失败")
+                val errorMsg = parseErrorResponse(response, "开始停车失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -480,15 +551,8 @@ class Repository(private val context: Context) {
             return NetworkResult.Success(emptyList())
         }
 
-        return try {
-            val response = api.getParkingHistory()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取停车记录失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取停车记录失败") {
+            api.getParkingHistory()
         }
     }
 
@@ -531,10 +595,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("路径规划失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "路径规划失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -575,10 +640,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("AI请求失败")
+                val errorMsg = parseErrorResponse(response, "AI请求失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -616,10 +682,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("拥堵预测失败")
+                val errorMsg = parseErrorResponse(response, "拥堵预测失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -645,10 +712,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("图像分析失败")
+                val errorMsg = parseErrorResponse(response, "图像分析失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -663,15 +731,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getTrafficStatus()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取路况失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取路况失败") {
+            api.getTrafficStatus()
         }
     }
 
@@ -684,15 +745,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getRoadTraffic()
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取道路路况失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取道路路况失败") {
+            api.getRoadTraffic()
         }
     }
 
@@ -713,10 +767,11 @@ class Repository(private val context: Context) {
                 val queues = response.body()!!.queues ?: emptyMap()
                 NetworkResult.Success(queues)
             } else {
-                NetworkResult.Error("获取闸口排队失败")
+                val errorMsg = parseErrorResponse(response, "获取闸口排队失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -735,15 +790,8 @@ class Repository(private val context: Context) {
             ))
         }
 
-        return try {
-            val response = api.getTripHistory(page, limit)
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("获取行程历史失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
+        return safeApiCall("获取行程历史失败") {
+            api.getTripHistory(page, limit)
         }
     }
 
@@ -788,10 +836,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("停车记录失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "停车记录失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -824,10 +873,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("寻车失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "寻车失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -860,10 +910,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("发起位置共享失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "发起位置共享失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -897,10 +948,11 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("获取共享信息失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "获取共享信息失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
@@ -918,23 +970,20 @@ class Repository(private val context: Context) {
             if (response.isSuccessful) {
                 NetworkResult.Success(true)
             } else {
-                NetworkResult.Error("停止位置共享失败: ${response.message()}")
+                val errorMsg = parseErrorResponse(response, "停止位置共享失败")
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
-            NetworkResult.Exception(e)
+            NetworkResult.Error(getFriendlyErrorMessage(e))
         }
     }
 
     /**
      * 获取WebSocket基础URL
+     * 自动从 RetrofitClient 获取当前配置的地址并转换
      */
     fun getWebSocketBaseUrl(): String {
-        return if (USE_LOCAL_MOCK) {
-            "ws://192.168.31.4:8000"  // Android模拟器访问本机
-        } else {
-            // 从HTTP URL转换为WebSocket URL
-            "ws://192.168.31.4:8000"  // 实际部署时替换为后端地址
-        }
+        return RetrofitClient.getWebSocketBaseUrl()
     }
 
     /**

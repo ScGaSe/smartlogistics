@@ -20,33 +20,15 @@ import java.util.concurrent.TimeUnit
 /**
  * 用户通知 WebSocket 服务
  *
- * 后端接口: ws://localhost:8000/ws/user/{user_id}
+ * 后端接口: ws://{host}:{port}/ws/user/{user_id}
  *
- * 功能：
- * 1. 接收航班/火车状态变化提醒
- * 2. 接收系统通知
- * 3. 接收位置共享邀请
- * 4. 显示本地通知
- *
- * 消息格式示例:
- * {
- *   "type": "flight_update",
- *   "title": "航班状态更新",
- *   "message": "MU5521 已开始登机，登机口 A12",
- *   "data": {
- *     "trip_id": 1,
- *     "status": "boarding",
- *     "gate": "A12"
- *   }
- * }
+ * 修复记录：
+ * - 2026-01-17: 修复 WS_BASE_URL 硬编码问题，改为从 RetrofitClient 动态获取
  */
 class NotificationService private constructor() {
 
     companion object {
-        private const val TAG = "NotificationService"
-
-        // ⭐ 后端WebSocket地址（部署时修改）
-        private const val WS_BASE_URL = "ws://localhost:8000/ws/user"
+        private const val TAG = "SL_NotificationService"
 
         // 通知渠道
         private const val CHANNEL_ID_TRIP = "trip_notifications"
@@ -58,8 +40,9 @@ class NotificationService private constructor() {
         private const val MAX_RECONNECT_ATTEMPTS = 10
 
         // ⭐⭐⭐ 模拟模式开关 - 设为 true 可在无后端时测试通知 ⭐⭐⭐
-        private const val USE_MOCK_DATA = false  // 正式对接后端，设为 false
-        private const val MOCK_NOTIFICATION_INTERVAL_MS = 15000L  // 模拟通知间隔（15秒）
+        // 注意：此开关应与 Repository.USE_LOCAL_MOCK 保持一致
+        private const val USE_MOCK_DATA = false
+        private const val MOCK_NOTIFICATION_INTERVAL_MS = 15000L
 
         @Volatile
         private var instance: NotificationService? = null
@@ -95,23 +78,18 @@ class NotificationService private constructor() {
 
     // ==================== 状态流 ====================
 
-    /** 连接状态 */
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    /** 最新通知（用于UI即时显示）*/
     private val _latestNotification = MutableStateFlow<UserNotification?>(null)
     val latestNotification: StateFlow<UserNotification?> = _latestNotification
 
-    /** 通知事件流（用于监听所有通知）*/
     private val _notificationEvents = MutableSharedFlow<UserNotification>(replay = 0)
     val notificationEvents: SharedFlow<UserNotification> = _notificationEvents
 
-    /** 未读通知数 */
     private val _unreadCount = MutableStateFlow(0)
     val unreadCount: StateFlow<Int> = _unreadCount
 
-    /** 错误信息 */
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
@@ -124,22 +102,16 @@ class NotificationService private constructor() {
         RECONNECTING
     }
 
-    /**
-     * 通知类型
-     */
     enum class NotificationType {
-        FLIGHT_UPDATE,      // 航班状态更新
-        TRAIN_UPDATE,       // 火车状态更新
-        LOCATION_SHARE,     // 位置共享邀请
-        SYSTEM,             // 系统通知
-        PARKING,            // 停车提醒
-        CONGESTION_ALERT,   // 拥堵预警
+        FLIGHT_UPDATE,
+        TRAIN_UPDATE,
+        LOCATION_SHARE,
+        SYSTEM,
+        PARKING,
+        CONGESTION_ALERT,
         UNKNOWN
     }
 
-    /**
-     * 用户通知数据
-     */
     data class UserNotification(
         val id: String = System.currentTimeMillis().toString(),
         val type: NotificationType,
@@ -153,8 +125,20 @@ class NotificationService private constructor() {
     // ==================== 公开方法 ====================
 
     /**
+     * 获取 WebSocket 基础 URL
+     * 从 RetrofitClient 动态获取
+     */
+    private fun getWsBaseUrl(): String {
+        return try {
+            "${RetrofitClient.getWebSocketBaseUrl()}/ws/user"
+        } catch (e: Exception) {
+            Log.w(TAG, "RetrofitClient 未初始化，使用默认地址")
+            "ws://192.168.31.4:8000/ws/user"
+        }
+    }
+
+    /**
      * 初始化通知服务
-     * @param context Application Context
      */
     fun initialize(context: Context) {
         applicationContext = context.applicationContext
@@ -163,7 +147,6 @@ class NotificationService private constructor() {
 
     /**
      * 连接用户通知WebSocket
-     * @param userId 用户ID
      */
     fun connect(userId: Int) {
         if (_connectionState.value == ConnectionState.CONNECTED && currentUserId == userId) {
@@ -171,21 +154,19 @@ class NotificationService private constructor() {
             return
         }
 
-        // 断开旧连接
         disconnect()
 
         currentUserId = userId
         isManuallyDisconnected = false
         _connectionState.value = ConnectionState.CONNECTING
 
-        // ⭐ 模拟模式：不连接真实WebSocket，使用模拟通知
         if (USE_MOCK_DATA) {
             Log.d(TAG, "🔧 模拟模式已启用，将发送模拟通知")
             startMockNotifications()
             return
         }
 
-        val url = "$WS_BASE_URL/$userId"
+        val url = "${getWsBaseUrl()}/$userId"
         Log.d(TAG, "连接用户通知: $url")
 
         val request = Request.Builder()
@@ -202,7 +183,6 @@ class NotificationService private constructor() {
         Log.d(TAG, "断开用户通知连接")
         isManuallyDisconnected = true
 
-        // 停止模拟通知
         mockNotificationJob?.cancel()
         mockNotificationJob = null
 
@@ -214,22 +194,19 @@ class NotificationService private constructor() {
     }
 
     /**
-     * ⭐ 启动模拟通知（用于无后端时测试）
+     * 启动模拟通知
      */
     private fun startMockNotifications() {
         mockNotificationJob?.cancel()
         mockNotificationJob = scope.launch {
-            // 模拟连接延迟
             delay(500)
             _connectionState.value = ConnectionState.CONNECTED
             _error.value = null
             Log.d(TAG, "✅ 模拟通知服务已启动")
 
-            // 立即发送一条欢迎通知
             delay(2000)
             sendMockNotification()
 
-            // 然后定期发送模拟通知
             while (isActive && !isManuallyDisconnected) {
                 delay(MOCK_NOTIFICATION_INTERVAL_MS)
                 sendMockNotification()
@@ -238,10 +215,9 @@ class NotificationService private constructor() {
     }
 
     /**
-     * ⭐ 发送模拟通知
+     * 发送模拟通知
      */
     private fun sendMockNotification() {
-        // 模拟通知列表
         val mockNotifications = listOf(
             Triple(NotificationType.FLIGHT_UPDATE, "航班状态更新", "MU5521 已开始登机，登机口 A12"),
             Triple(NotificationType.FLIGHT_UPDATE, "航班延误提醒", "CA1234 预计延误30分钟，请关注后续通知"),
@@ -261,23 +237,20 @@ class NotificationService private constructor() {
             message = message
         )
 
-        // 更新状态
         _latestNotification.value = notification
         _unreadCount.value = _unreadCount.value + 1
 
-        // 发送事件
         scope.launch {
             _notificationEvents.emit(notification)
         }
 
-        // 显示系统通知
         showSystemNotification(notification)
 
         Log.d(TAG, "🔔 模拟通知: $type - $title")
     }
 
     /**
-     * ⭐ 手动触发一条测试通知（供调试使用）
+     * 手动触发测试通知
      */
     fun sendTestNotification() {
         if (_connectionState.value == ConnectionState.CONNECTED) {
@@ -359,7 +332,6 @@ class NotificationService private constructor() {
             val title = json.optString("title", "通知")
             val message = json.optString("message", "")
 
-            // 解析附加数据
             val dataJson = json.optJSONObject("data")
             val data = dataJson?.let { parseDataObject(it) }
 
@@ -370,16 +342,13 @@ class NotificationService private constructor() {
                 data = data
             )
 
-            // 更新状态
             _latestNotification.value = notification
             _unreadCount.value = _unreadCount.value + 1
 
-            // 发送事件
             scope.launch {
                 _notificationEvents.emit(notification)
             }
 
-            // 显示系统通知
             showSystemNotification(notification)
 
             Log.d(TAG, "处理通知: $type - $title")
@@ -437,7 +406,6 @@ class NotificationService private constructor() {
             val context = applicationContext ?: return
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            // 行程通知渠道（高优先级）
             val tripChannel = NotificationChannel(
                 CHANNEL_ID_TRIP,
                 "行程提醒",
@@ -447,7 +415,6 @@ class NotificationService private constructor() {
                 enableVibration(true)
             }
 
-            // 系统通知渠道（默认优先级）
             val systemChannel = NotificationChannel(
                 CHANNEL_ID_SYSTEM,
                 "系统通知",
@@ -456,7 +423,6 @@ class NotificationService private constructor() {
                 description = "系统消息和公告"
             }
 
-            // 位置共享通知渠道
             val shareChannel = NotificationChannel(
                 CHANNEL_ID_SHARE,
                 "位置共享",
@@ -473,6 +439,15 @@ class NotificationService private constructor() {
     private fun showSystemNotification(notification: UserNotification) {
         val context = applicationContext ?: return
 
+        // Android 13+ 需要检查通知权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "没有通知权限，跳过系统通知")
+                return
+            }
+        }
+
         val channelId = when (notification.type) {
             NotificationType.FLIGHT_UPDATE, NotificationType.TRAIN_UPDATE -> CHANNEL_ID_TRIP
             NotificationType.LOCATION_SHARE -> CHANNEL_ID_SHARE
@@ -488,7 +463,6 @@ class NotificationService private constructor() {
             else -> android.R.drawable.ic_dialog_info
         }
 
-        // 创建点击Intent（打开APP）
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         val pendingIntent = PendingIntent.getActivity(
             context,

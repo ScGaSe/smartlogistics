@@ -11,33 +11,25 @@ import java.util.concurrent.TimeUnit
 /**
  * 道路实况 WebSocket
  *
- * 后端接口: ws://localhost:8000/ws/traffic
+ * 后端接口: ws://{host}:{port}/ws/traffic
  * 推送频率: 每30秒自动推送
  *
- * 推送数据格式:
- * {
- *   "type": "traffic",
- *   "timestamp": "2026-01-16T12:15:06",
- *   "gates": {"Gate_N1": 3, "Gate_N2": 0, "Gate_S1": 1, "Gate_E1": 2}
- * }
+ * 修复记录：
+ * - 2026-01-17: 修复 WS_URL 硬编码问题，改为从 RetrofitClient 动态获取
  */
 class TrafficWebSocket private constructor() {
 
     companion object {
-        private const val TAG = "TrafficWebSocket"
-
-        // ⭐ 后端WebSocket地址
-        // Android模拟器访问本机用 10.0.2.2
-        // 真机调试用电脑局域网IP
-        private const val WS_URL = "ws://10.0.2.2:8000/ws/traffic"
+        private const val TAG = "SL_TrafficWebSocket"
 
         // 重连配置
         private const val RECONNECT_DELAY_MS = 5000L
         private const val MAX_RECONNECT_ATTEMPTS = 10
 
         // ⭐⭐⭐ 模拟模式开关 - 设为 true 可在无后端时测试 UI ⭐⭐⭐
-        private const val USE_MOCK_DATA = false  // 正式对接后端，设为 false
-        private const val MOCK_UPDATE_INTERVAL_MS = 5000L  // 模拟数据更新间隔（毫秒）
+        // 注意：此开关应与 Repository.USE_LOCAL_MOCK 保持一致
+        private const val USE_MOCK_DATA = false
+        private const val MOCK_UPDATE_INTERVAL_MS = 5000L
 
         @Volatile
         private var instance: TrafficWebSocket? = null
@@ -93,17 +85,14 @@ class TrafficWebSocket private constructor() {
     // ==================== 枚举 ====================
 
     enum class ConnectionState {
-        DISCONNECTED,   // 已断开
-        CONNECTING,     // 连接中
-        CONNECTED,      // 已连接
-        RECONNECTING    // 重连中
+        DISCONNECTED,
+        CONNECTING,
+        CONNECTED,
+        RECONNECTING
     }
 
     // ==================== 数据类 ====================
 
-    /**
-     * 闸口信息
-     */
     data class GateInfo(
         val gateId: String,
         val gateName: String,
@@ -112,31 +101,42 @@ class TrafficWebSocket private constructor() {
     )
 
     enum class GateStatus {
-        SMOOTH,     // 畅通 (0-2辆)
-        NORMAL,     // 正常 (3-5辆)
-        BUSY,       // 繁忙 (6-10辆)
-        CONGESTED   // 拥堵 (>10辆)
+        SMOOTH,
+        NORMAL,
+        BUSY,
+        CONGESTED
     }
 
-    /**
-     * 路段拥堵信息
-     */
     data class RoadSegment(
         val roadId: String,
         val roadName: String,
-        val tti: Float,          // 交通指数 1.0=畅通, >2.0=拥堵
-        val speed: Float,        // 当前速度 km/h
+        val tti: Float,
+        val speed: Float,
         val congestionLevel: CongestionLevel
     )
 
     enum class CongestionLevel {
-        SMOOTH,     // 畅通 TTI < 1.5
-        SLOW,       // 缓行 1.5 <= TTI < 2.0
-        CONGESTED,  // 拥堵 2.0 <= TTI < 3.0
-        BLOCKED     // 严重拥堵 TTI >= 3.0
+        SMOOTH,
+        SLOW,
+        CONGESTED,
+        BLOCKED
     }
 
     // ==================== 公开方法 ====================
+
+    /**
+     * 获取 WebSocket URL
+     * 从 RetrofitClient 动态获取基础地址
+     */
+    private fun getWsUrl(): String {
+        return try {
+            "${RetrofitClient.getWebSocketBaseUrl()}/ws/traffic"
+        } catch (e: Exception) {
+            // RetrofitClient 未初始化时的降级处理
+            Log.w(TAG, "RetrofitClient 未初始化，使用默认地址")
+            "ws://192.168.31.4:8000/ws/traffic"
+        }
+    }
 
     /**
      * 连接道路实况WebSocket
@@ -157,10 +157,11 @@ class TrafficWebSocket private constructor() {
             return
         }
 
-        Log.d(TAG, "连接道路实况: $WS_URL")
+        val wsUrl = getWsUrl()
+        Log.d(TAG, "连接道路实况: $wsUrl")
 
         val request = Request.Builder()
-            .url(WS_URL)
+            .url(wsUrl)
             .build()
 
         webSocket = client.newWebSocket(request, createWebSocketListener())
@@ -173,7 +174,6 @@ class TrafficWebSocket private constructor() {
         Log.d(TAG, "断开道路实况连接")
         isManuallyDisconnected = true
 
-        // 停止模拟数据生成
         mockDataJob?.cancel()
         mockDataJob = null
 
@@ -184,18 +184,16 @@ class TrafficWebSocket private constructor() {
     }
 
     /**
-     * ⭐ 启动模拟数据生成（用于无后端时测试UI）
+     * 启动模拟数据生成
      */
     private fun startMockDataGeneration() {
         mockDataJob?.cancel()
         mockDataJob = scope.launch {
-            // 模拟连接延迟
             delay(500)
             _connectionState.value = ConnectionState.CONNECTED
             _error.value = null
             Log.d(TAG, "✅ 模拟连接成功")
 
-            // 持续生成模拟数据
             while (isActive && !isManuallyDisconnected) {
                 generateMockTrafficData()
                 delay(MOCK_UPDATE_INTERVAL_MS)
@@ -204,26 +202,23 @@ class TrafficWebSocket private constructor() {
     }
 
     /**
-     * ⭐ 生成模拟闸口数据
+     * 生成模拟闸口数据
      */
     private fun generateMockTrafficData() {
         val random = java.util.Random()
 
-        // 模拟各闸口排队数量（0-15辆随机）
         val mockGates = mapOf(
-            "Gate_N1" to random.nextInt(8),      // 北1号：0-7辆
-            "Gate_N2" to random.nextInt(5),      // 北2号：0-4辆（较少）
-            "Gate_S1" to random.nextInt(12),     // 南1号：0-11辆
-            "Gate_E1" to random.nextInt(6),      // 东1号：0-5辆
-            "Gate_E2" to random.nextInt(4),      // 东2号：0-3辆
-            "Gate_W1" to random.nextInt(10)      // 西1号：0-9辆
+            "Gate_N1" to random.nextInt(8),
+            "Gate_N2" to random.nextInt(5),
+            "Gate_S1" to random.nextInt(12),
+            "Gate_E1" to random.nextInt(6),
+            "Gate_E2" to random.nextInt(4),
+            "Gate_W1" to random.nextInt(10)
         )
 
-        // 生成当前时间戳
         val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date())
 
-        // 更新状态
         _gateQueues.value = mockGates
         _lastUpdateTime.value = timestamp
 
@@ -318,7 +313,6 @@ class TrafficWebSocket private constructor() {
                 Log.d(TAG, "道路实况WebSocket已关闭: $code - $reason")
                 _connectionState.value = ConnectionState.DISCONNECTED
 
-                // 非主动断开则尝试重连
                 if (!isManuallyDisconnected) {
                     tryReconnect()
                 }
@@ -329,7 +323,6 @@ class TrafficWebSocket private constructor() {
                 _connectionState.value = ConnectionState.DISCONNECTED
                 _error.value = "连接失败: ${t.message}"
 
-                // 尝试重连
                 if (!isManuallyDisconnected) {
                     tryReconnect()
                 }
@@ -343,10 +336,8 @@ class TrafficWebSocket private constructor() {
 
             when (json.optString("type")) {
                 "traffic" -> {
-                    // 解析时间戳
                     _lastUpdateTime.value = json.optString("timestamp")
 
-                    // 解析闸口数据
                     val gatesJson = json.optJSONObject("gates")
                     if (gatesJson != null) {
                         val gates = mutableMapOf<String, Int>()
@@ -357,7 +348,6 @@ class TrafficWebSocket private constructor() {
                         Log.d(TAG, "更新闸口数据: $gates")
                     }
 
-                    // 解析路段拥堵数据（如果有）
                     val roadsJson = json.optJSONObject("roads")
                     if (roadsJson != null) {
                         val roads = mutableMapOf<String, Float>()
@@ -397,9 +387,6 @@ class TrafficWebSocket private constructor() {
         }
     }
 
-    /**
-     * 闸口ID转名称
-     */
     private fun getGateName(gateId: String): String {
         return when (gateId) {
             "Gate_N1" -> "北1号闸口"
