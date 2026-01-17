@@ -136,11 +136,20 @@ fun AiChatScreen(
             is AIState.Success -> {
                 isLoading = false
                 aiResponse?.let { response ->
+                    // 兼容新旧两种响应格式
+                    val answerText = response.answer
+                        ?: response.data?.answer
+                        ?: "抱歉，暂时无法回答"
+                    val intentType = response.intent?.intentType
+                        ?: response.data?.intent
+                    val destination = response.intent?.destination
+                        ?: response.data?.entities?.destination
+
                     val aiMessage = ChatMessage(
-                        content = response.answer,
+                        content = answerText,
                         isUser = false,
-                        intentType = response.intent?.intentType,
-                        destination = response.intent?.destination,
+                        intentType = intentType,
+                        destination = destination,
                         confidence = response.intent?.confidence
                     )
                     messages = messages + aiMessage

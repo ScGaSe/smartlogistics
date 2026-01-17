@@ -13,19 +13,20 @@ import java.io.File
  * 封装所有网络请求逻辑
  */
 class Repository(private val context: Context) {
-    
+
     private val api: ApiService = RetrofitClient.apiService
     private val tokenManager = TokenManager(context)
-    
+
     companion object {
         // ★★★ 本地Mock开关 ★★★
-        // true = 不走网络，用本地假数据（Mock Server挂了时用）
-        // false = 正常走网络请求
-        var USE_LOCAL_MOCK = true
+        // true = 不走网络，用本地假数据（后端未启动时用）
+        // false = 正常走网络请求（对接后端时设为false）
+        // ⚠️ 对接后端前，请将此开关设为 false
+        var USE_LOCAL_MOCK = false
     }
-    
+
     // ==================== 认证相关 ====================
-    
+
     suspend fun register(phoneNumber: String, password: String, role: String): NetworkResult<RegisterResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -36,7 +37,7 @@ class Repository(private val context: Context) {
                 message = "注册成功"
             ))
         }
-        
+
         return try {
             val response = api.register(RegisterRequest(phoneNumber, password, role))
             if (response.isSuccessful && response.body() != null) {
@@ -71,7 +72,7 @@ class Repository(private val context: Context) {
                 )
             ))
         }
-        
+
         return try {
             val response = api.login(
                 username = phoneNumber,
@@ -96,19 +97,19 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     fun logout() {
         tokenManager.clearToken()
     }
-    
+
     fun isLoggedIn(): Boolean = tokenManager.getToken() != null
-    
+
     fun getUserName(): String = tokenManager.getUserName() ?: "用户"
-    
+
     fun isProfessionalMode(): Boolean = tokenManager.getUserRole() == "professional"
-    
+
     fun getSavedUserRole(): String = tokenManager.getUserRole()
-    
+
     suspend fun getCurrentUser(): NetworkResult<UserInfo> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -122,7 +123,7 @@ class Repository(private val context: Context) {
                 phoneNumber = tokenManager.getUserName()
             ))
         }
-        
+
         return try {
             val response = api.getCurrentUser()
             if (response.isSuccessful && response.body() != null) {
@@ -134,9 +135,9 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 车辆管理 ====================
-    
+
     suspend fun getVehicles(): NetworkResult<List<Vehicle>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -149,7 +150,7 @@ class Repository(private val context: Context) {
                 )
             ))
         }
-        
+
         return try {
             val response = api.getVehicles()
             if (response.isSuccessful && response.body() != null) {
@@ -161,7 +162,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun bindVehicle(
         plateNumber: String,
         vehicleType: String,
@@ -178,12 +179,12 @@ class Repository(private val context: Context) {
                 specs = VehicleSpecs(heightM, weightT, axleCount)
             ))
         }
-        
+
         return try {
             val specs = if (heightM != null || weightT != null || axleCount != null) {
                 VehicleSpecs(heightM, weightT, axleCount)
             } else null
-            
+
             val request = BindVehicleRequest(plateNumber, vehicleType, specs = specs)
             val response = api.createVehicle(request)
             if (response.isSuccessful && response.body() != null) {
@@ -195,10 +196,10 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun unbindVehicle(vehicleId: String): Boolean {
         if (USE_LOCAL_MOCK) return true
-        
+
         return try {
             val response = api.deleteVehicle(vehicleId.toInt())
             response.isSuccessful
@@ -206,9 +207,9 @@ class Repository(private val context: Context) {
             false
         }
     }
-    
+
     // ==================== 货物报备 (专业模式) ====================
-    
+
     suspend fun getCargoReports(page: Int = 1): NetworkResult<ReportListResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -219,7 +220,7 @@ class Repository(private val context: Context) {
                 pageSize = 20
             ))
         }
-        
+
         return try {
             val response = api.getReports(page)
             if (response.isSuccessful && response.body() != null) {
@@ -231,7 +232,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun submitCargoReport(
         vehicleId: String,
         destinationId: String,
@@ -239,7 +240,9 @@ class Repository(private val context: Context) {
         isHazardous: Boolean,
         hazardClass: String? = null,
         weight: Double? = null,
-        description: String? = null
+        description: String? = null,
+        origin: String? = null,
+        eta: String? = null
     ): NetworkResult<CargoReport> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -252,19 +255,16 @@ class Repository(private val context: Context) {
                 status = "pending"
             ))
         }
-        
+
         return try {
-            val cargoInfo = CargoInfo(
-                cargoType = cargoType,
-                isHazardous = isHazardous,
-                hazardClass = hazardClass,
-                weight = weight,
-                description = description
-            )
+            // 使用新的请求格式
             val request = SubmitReportRequest(
                 vehicleId = vehicleId.toInt(),
-                destinationPoiId = destinationId,
-                cargoInfo = cargoInfo
+                cargoType = cargoType,
+                weight = weight,
+                origin = origin,
+                destination = destinationId,
+                eta = eta
             )
             val response = api.createReport(request)
             if (response.isSuccessful && response.body() != null) {
@@ -276,15 +276,15 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 行程管理 (个人模式) ====================
-    
+
     suspend fun getTrips(): NetworkResult<List<Trip>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(emptyList())
         }
-        
+
         return try {
             val response = api.getTrips()
             if (response.isSuccessful && response.body() != null) {
@@ -296,7 +296,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun createTrip(tripType: String, tripNumber: String, tripDate: String): NetworkResult<Trip> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -308,7 +308,7 @@ class Repository(private val context: Context) {
                 status = "scheduled"
             ))
         }
-        
+
         return try {
             val request = CreateTripRequest(tripType, tripNumber, tripDate)
             val response = api.createTrip(request)
@@ -321,22 +321,23 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== POI查询 ====================
-    
-    suspend fun getPOIs(type: String? = null, mode: String? = null): NetworkResult<List<POI>> {
+
+    suspend fun getPOIs(type: String? = null, lat: Double? = null, lng: Double? = null, radius: Int? = null): NetworkResult<List<POI>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(listOf(
-                POI("1", "中央停车场", "parking", "personal", 28.225, 112.950),
-                POI("2", "T1航站楼", "terminal", "personal", 28.227, 112.953)
+                POI("Parking_Central", "中央停车场", lat = 28.225, lng = 112.950, type = "停车场"),
+                POI("Terminal_T1", "T1航站楼", lat = 28.227, lng = 112.953, type = "航站楼")
             ))
         }
-        
+
         return try {
-            val response = api.getPois(type, mode)
+            val response = api.getPois(type, lat, lng, radius)
             if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
+                val pois = response.body()!!.data?.pois ?: emptyList()
+                NetworkResult.Success(pois)
             } else {
                 NetworkResult.Error("获取POI失败")
             }
@@ -344,9 +345,94 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
+    suspend fun getNearbyPOIs(lat: Double, lng: Double, radius: Int = 1000, type: String? = null): NetworkResult<List<POI>> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(listOf(
+                POI("Parking_Central", "中央停车场", lat = 28.225, lng = 112.950, type = "停车场"),
+                POI("Restaurant_1", "机场餐厅", lat = 28.226, lng = 112.951, type = "餐厅")
+            ))
+        }
+
+        return try {
+            val response = api.getNearbyPois(lat, lng, radius, type)
+            if (response.isSuccessful && response.body() != null) {
+                val pois = response.body()!!.data?.pois ?: emptyList()
+                NetworkResult.Success(pois)
+            } else {
+                NetworkResult.Error("获取附近POI失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
     // ==================== 停车管理 ====================
-    
+
+    suspend fun getNearbyParking(lat: Double, lng: Double, radius: Int = 2000): NetworkResult<List<ParkingInfo>> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(listOf(
+                ParkingInfo("Parking_Central", "中央停车场", lat = 28.225, lng = 112.950,
+                    totalSpots = 800, availableSpots = 656, price = "5元/小时", distance = 0),
+                ParkingInfo("Parking_P1", "P1停车场", lat = 28.230, lng = 112.948,
+                    totalSpots = 500, availableSpots = 500, price = "5元/小时", distance = 597)
+            ))
+        }
+
+        return try {
+            val response = api.getNearbyParking(lat, lng, radius)
+            if (response.isSuccessful && response.body() != null) {
+                val parkings = response.body()!!.data?.parkings ?: emptyList()
+                NetworkResult.Success(parkings)
+            } else {
+                NetworkResult.Error("获取附近停车场失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
+    suspend fun getAllParking(): NetworkResult<List<ParkingInfo>> {
+        if (USE_LOCAL_MOCK) {
+            return getNearbyParking(28.225, 112.950)
+        }
+
+        return try {
+            val response = api.getAllParking()
+            if (response.isSuccessful && response.body() != null) {
+                val parkings = response.body()!!.data?.parkings ?: emptyList()
+                NetworkResult.Success(parkings)
+            } else {
+                NetworkResult.Error("获取停车场列表失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
+    suspend fun getBestParking(): NetworkResult<List<ParkingInfo>> {
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(listOf(
+                ParkingInfo("Parking_Central", "中央停车场（推荐）", lat = 28.225, lng = 112.950,
+                    totalSpots = 800, availableSpots = 656, price = "5元/小时", distance = 0)
+            ))
+        }
+
+        return try {
+            val response = api.getBestParking()
+            if (response.isSuccessful && response.body() != null) {
+                val parkings = response.body()!!.data?.parkings ?: emptyList()
+                NetworkResult.Success(parkings)
+            } else {
+                NetworkResult.Error("获取推荐停车场失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
     suspend fun startParking(vehicleId: Int, parkingLotId: String): NetworkResult<ParkingSession> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -357,7 +443,7 @@ class Repository(private val context: Context) {
                 status = "active"
             ))
         }
-        
+
         return try {
             val request = StartParkingRequest(vehicleId, parkingLotId)
             val response = api.startParking(request)
@@ -370,13 +456,13 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun getParkingHistory(): NetworkResult<List<ParkingSession>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(emptyList())
         }
-        
+
         return try {
             val response = api.getParkingHistory()
             if (response.isSuccessful && response.body() != null) {
@@ -388,9 +474,54 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 导航路线 ====================
-    
+
+    suspend fun planRoute(
+        startLat: Double,
+        startLng: Double,
+        endLat: Double,
+        endLng: Double,
+        vehicleId: String? = null,
+        role: String = "car"
+    ): NetworkResult<RouteResponse> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(RouteResponse(
+                code = 0,
+                message = "success",
+                data = RouteData(
+                    routes = listOf(
+                        RouteInfo(
+                            distance = 1500,
+                            duration = 150,
+                            strategy = "最短时间",
+                            polyline = "$startLng,$startLat;$endLng,$endLat"
+                        )
+                    )
+                )
+            ))
+        }
+
+        return try {
+            val request = RouteRequest(
+                start = LatLngPoint(startLat, startLng),
+                end = LatLngPoint(endLat, endLng),
+                vehicleId = vehicleId,
+                role = role
+            )
+            val response = api.planRoute(request)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("路径规划失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
+    // 兼容旧方法
     suspend fun getRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null): NetworkResult<RouteResult> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -401,31 +532,26 @@ class Repository(private val context: Context) {
                 estimatedTime = 300
             ))
         }
-        
-        return try {
-            val request = RouteRequest(startPoiId, endPoiId, vehicleId)
-            val response = api.planRoute(request)
-            if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
-            } else {
-                NetworkResult.Error("路径规划失败")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Exception(e)
-        }
+
+        // 旧方法暂时返回Mock数据，后端不再支持POI ID方式
+        return NetworkResult.Success(RouteResult(
+            path = listOf(startPoiId, endPoiId),
+            totalCost = 100f
+        ))
     }
-    
+
     // ==================== AI智能问答 (新增) ====================
-    
+
     suspend fun askAI(query: String, role: String? = null): NetworkResult<AskResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(AskResponse(
-                answer = "您好！我是智慧物流助手，可以帮您规划路线、查询路况、预测拥堵等。请问有什么可以帮您的？",
-                role = role
+                code = 0,
+                message = "success",
+                answer = "您好！我是智慧物流助手，可以帮您规划路线、查询路况、预测拥堵等。请问有什么可以帮您的？"
             ))
         }
-        
+
         return try {
             val request = AskRequest(query, role)
             val response = api.askAI(request)
@@ -438,25 +564,38 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 拥堵预测 (新增) ====================
-    
-    suspend fun predictCongestion(roadId: String, hours: Int = 2): NetworkResult<CongestionResponse> {
+
+    suspend fun predictCongestion(
+        roadId: String? = null,
+        lat: Double? = null,
+        lng: Double? = null,
+        radius: Int? = null,
+        hours: Int = 5
+    ): NetworkResult<CongestionResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(CongestionResponse(
-                status = "success",
-                roadId = roadId,
-                forecast = listOf(
-                    CongestionForecast("14:00", 1.2f, "Free Flow"),
-                    CongestionForecast("15:00", 1.5f, "Slow"),
-                    CongestionForecast("16:00", 2.0f, "Congested")
+                code = 0,
+                message = "success",
+                data = CongestionData(
+                    roadName = "机场高速",
+                    currentTti = 1.2f,
+                    predictions = listOf(
+                        CongestionPrediction("14:00", 1.3f),
+                        CongestionPrediction("15:00", 1.8f),
+                        CongestionPrediction("16:00", 2.1f),
+                        CongestionPrediction("17:00", 2.5f),
+                        CongestionPrediction("18:00", 1.9f)
+                    ),
+                    suggestion = "建议16:00前出发，避开高峰期"
                 )
             ))
         }
-        
+
         return try {
-            val response = api.predictCongestion(roadId, hours)
+            val response = api.predictCongestion(roadId, lat, lng, radius, hours)
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
@@ -466,9 +605,9 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 视觉检测 (新增) ====================
-    
+
     suspend fun analyzeVehicleImage(imageFile: File): NetworkResult<VisionResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -481,7 +620,7 @@ class Repository(private val context: Context) {
                 plates = listOf(PlateDetection(listOf(100, 200, 300, 250), 0.98f, "湘A12345"))
             ))
         }
-        
+
         return try {
             val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
             val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
@@ -495,9 +634,9 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 路况查询 ====================
-    
+
     suspend fun getTrafficData(): NetworkResult<TrafficData> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -506,7 +645,7 @@ class Repository(private val context: Context) {
                 congestionLevel = "moderate"
             ))
         }
-        
+
         return try {
             val response = api.getTrafficStatus()
             if (response.isSuccessful && response.body() != null) {
@@ -518,7 +657,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     suspend fun getRoadTraffic(): NetworkResult<List<RoadTraffic>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -527,7 +666,7 @@ class Repository(private val context: Context) {
                 RoadTraffic("road_2", "枢纽大道", 1.0f, "Free Flow")
             ))
         }
-        
+
         return try {
             val response = api.getRoadTraffic()
             if (response.isSuccessful && response.body() != null) {
@@ -539,9 +678,60 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
+    suspend fun getGateQueues(): NetworkResult<Map<String, Int>> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(mapOf(
+                "Gate_N1" to 3,
+                "Gate_N2" to 0,
+                "Gate_S1" to 1,
+                "Gate_E1" to 2
+            ))
+        }
+
+        return try {
+            val response = api.getGateQueues()
+            if (response.isSuccessful && response.body() != null) {
+                val queues = response.body()!!.queues ?: emptyMap()
+                NetworkResult.Success(queues)
+            } else {
+                NetworkResult.Error("获取闸口排队失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
+    // ==================== 历史记录 ====================
+
+    suspend fun getTripHistory(page: Int = 1, limit: Int = 20): NetworkResult<TripHistoryResponse> {
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(TripHistoryResponse(
+                code = 0,
+                data = TripHistoryData(
+                    total = 1,
+                    trips = listOf(
+                        TripHistory(1, "flight", "CA1234", "2026-01-20", "scheduled")
+                    )
+                )
+            ))
+        }
+
+        return try {
+            val response = api.getTripHistory(page, limit)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("获取行程历史失败")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+
     // ==================== 停车预测 ====================
-    
+
     suspend fun getParkingPrediction(arrivalTime: String): NetworkResult<List<ParkingPrediction>> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -549,13 +739,13 @@ class Repository(private val context: Context) {
                 ParkingPrediction("parking_1", "中央停车场", 50, 200, 45, 5)
             ))
         }
-        
+
         // TODO: 实现停车预测API调用
         return NetworkResult.Success(emptyList())
     }
 
     // ==================== 智能停车助手 ====================
-    
+
     suspend fun registerParkingPhoto(imageFile: File, floor: String? = null, zone: String? = null): NetworkResult<ParkingRegisterResponse> {
         // 本地Mock模式
         if (USE_LOCAL_MOCK) {
@@ -571,7 +761,7 @@ class Repository(private val context: Context) {
                 message = "停车位置已记录"
             ))
         }
-        
+
         return try {
             val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
             val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
@@ -609,7 +799,7 @@ class Repository(private val context: Context) {
                 message = "找到您的车辆"
             ))
         }
-        
+
         return try {
             val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
             val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
@@ -623,9 +813,9 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     // ==================== 位置共享 ====================
-    
+
     /**
      * 发起位置共享
      * @param tripId 行程ID
@@ -647,7 +837,7 @@ class Repository(private val context: Context) {
                 expiredAt = sdf.format(java.util.Date(System.currentTimeMillis() + expiresInHours * 3600 * 1000L))
             ))
         }
-        
+
         return try {
             val response = api.createLocationShare(tripId, expiresInHours)
             if (response.isSuccessful && response.body() != null) {
@@ -659,7 +849,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     /**
      * 获取位置共享详情（用于加入共享）
      * @param shareId 分享码
@@ -684,7 +874,7 @@ class Repository(private val context: Context) {
                 expiredAt = sdf.format(java.util.Date(System.currentTimeMillis() + 24 * 3600 * 1000L))
             ))
         }
-        
+
         return try {
             val response = api.getLocationShareDetail(shareId)
             if (response.isSuccessful && response.body() != null) {
@@ -696,7 +886,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     /**
      * 停止位置共享
      */
@@ -705,7 +895,7 @@ class Repository(private val context: Context) {
         if (USE_LOCAL_MOCK) {
             return NetworkResult.Success(true)
         }
-        
+
         return try {
             val response = api.stopLocationShare(shareId)
             if (response.isSuccessful) {
@@ -717,7 +907,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
-    
+
     /**
      * 获取WebSocket基础URL
      */
@@ -729,7 +919,7 @@ class Repository(private val context: Context) {
             "ws://10.0.2.2:8000"  // 实际部署时替换为后端地址
         }
     }
-    
+
     /**
      * 获取Token（用于WebSocket认证）
      */

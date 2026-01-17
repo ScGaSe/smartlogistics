@@ -26,8 +26,10 @@ class TrafficWebSocket private constructor() {
     companion object {
         private const val TAG = "TrafficWebSocket"
 
-        // ⭐ 后端WebSocket地址（部署时修改）
-        private const val WS_URL = "ws://localhost:8000/ws/traffic"
+        // ⭐ 后端WebSocket地址
+        // Android模拟器访问本机用 10.0.2.2
+        // 真机调试用电脑局域网IP
+        private const val WS_URL = "ws://10.0.2.2:8000/ws/traffic"
 
         // 重连配置
         private const val RECONNECT_DELAY_MS = 5000L

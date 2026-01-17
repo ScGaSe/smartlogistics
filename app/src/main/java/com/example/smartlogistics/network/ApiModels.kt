@@ -7,7 +7,8 @@ import com.google.gson.annotations.SerializedName
 data class RegisterRequest(
     @SerializedName("phone_number") val phoneNumber: String,
     val password: String,
-    val role: String  // "professional" 或 "personal"
+    val role: String,  // "professional" 或 "personal"
+    val nickname: String? = null
 )
 
 data class RegisterResponse(
@@ -94,8 +95,14 @@ data class CargoInfo(
 
 data class SubmitReportRequest(
     @SerializedName("vehicle_id") val vehicleId: Int,
-    @SerializedName("destination_poi_id") val destinationPoiId: String,
-    @SerializedName("cargo_info") val cargoInfo: CargoInfo
+    @SerializedName("cargo_type") val cargoType: String,
+    val weight: Double? = null,
+    val origin: String? = null,
+    val destination: String? = null,
+    val eta: String? = null,
+    // 兼容旧字段
+    @SerializedName("destination_poi_id") val destinationPoiId: String? = null,
+    @SerializedName("cargo_info") val cargoInfo: CargoInfo? = null
 )
 
 data class ReportListResponse(
@@ -126,11 +133,26 @@ data class CreateTripRequest(
 
 // ==================== POI相关 ====================
 
+data class PoisResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val data: PoisData? = null
+)
+
+data class PoisData(
+    val pois: List<POI>? = null
+)
+
 data class POI(
     val id: String,
     val name: String,
-    @SerializedName("poi_type") val poiType: String,
-    val mode: String? = null,  // "pro" 或 "personal"
+    val lat: Double? = null,
+    val lng: Double? = null,
+    val type: String? = null,      // 停车场、航站楼、餐厅等
+    val address: String? = null,
+    // 兼容旧字段
+    @SerializedName("poi_type") val poiType: String? = null,
+    val mode: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
     val description: String? = null
@@ -157,17 +179,57 @@ data class StartParkingRequest(
 // ==================== 导航路线相关 ====================
 
 data class RouteRequest(
-    @SerializedName("start_poi_id") val startPoiId: String,
-    @SerializedName("end_poi_id") val endPoiId: String,
-    @SerializedName("vehicle_id") val vehicleId: Int? = null
+    val start: LatLngPoint,
+    val end: LatLngPoint,
+    @SerializedName("vehicle_id") val vehicleId: String? = null,
+    val role: String = "car"  // car=私家车, truck=货车
 )
 
+data class LatLngPoint(
+    val lat: Double,
+    val lng: Double
+)
+
+data class RouteResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val data: RouteData? = null
+)
+
+data class RouteData(
+    val routes: List<RouteInfo>? = null,
+    @SerializedName("algorithm_info") val algorithmInfo: AlgorithmInfo? = null
+)
+
+data class RouteInfo(
+    val distance: Int = 0,           // 距离（米）
+    val duration: Int = 0,           // 时间（秒）
+    @SerializedName("toll_cost") val tollCost: Int = 0,
+    val strategy: String? = null,
+    val polyline: String? = null,    // "lng,lat;lng,lat;..."
+    val steps: List<RouteStep>? = null
+)
+
+data class RouteStep(
+    val instruction: String? = null,
+    val distance: Int = 0,
+    val duration: Int = 0,
+    val polyline: String? = null
+)
+
+data class AlgorithmInfo(
+    val path: List<String>? = null,
+    @SerializedName("total_cost") val totalCost: Float? = null,
+    @SerializedName("constraints_applied") val constraintsApplied: List<String>? = null,
+    @SerializedName("congestion_info") val congestionInfo: Map<String, Int>? = null
+)
+
+// 兼容旧代码
 data class RouteResult(
     val path: List<String>,
     @SerializedName("total_cost") val totalCost: Float? = null,
     @SerializedName("constraints_applied") val constraintsApplied: List<String>? = null,
     @SerializedName("congestion_info") val congestionInfo: Map<String, Int>? = null,
-    // 兼容旧字段
     @SerializedName("total_distance") val totalDistance: Double? = null,
     @SerializedName("estimated_time") val estimatedTime: Int? = null,
     val waypoints: List<Waypoint>? = null
@@ -183,33 +245,60 @@ data class Waypoint(
 
 data class AskRequest(
     val query: String,
-    val role: String? = null  // 可选，帮助AI识别模式
+    val role: String? = null  // 可选，帮助AI识别模式: truck/car
 )
 
 data class AskResponse(
-    val answer: String,
-    val role: String? = null,
+    val code: Int = 0,
+    val message: String? = null,
+    val data: AskData? = null,
+    // 兼容旧格式（直接返回）
+    val answer: String? = null,
     val intent: AskIntent? = null
 )
 
+data class AskData(
+    val answer: String? = null,
+    val intent: String? = null,  // navigation, query, report
+    val entities: AskEntities? = null
+)
+
+data class AskEntities(
+    val destination: String? = null,
+    val lat: Double? = null,
+    val lng: Double? = null
+)
+
 data class AskIntent(
-    val role: String,
-    val confidence: Float,
-    @SerializedName("intent_type") val intentType: String,
+    val role: String? = null,
+    val confidence: Float = 0f,
+    @SerializedName("intent_type") val intentType: String? = null,
     @SerializedName("matched_keywords") val matchedKeywords: List<String>? = null,
-    // 导航相关
-    @SerializedName("destination") val destination: String? = null,
+    val destination: String? = null,
     @SerializedName("poi_id") val poiId: String? = null
 )
 
 // ==================== 拥堵预测相关 (新增) ====================
 
 data class CongestionResponse(
-    val status: String,
-    @SerializedName("road_id") val roadId: String,
-    val forecast: List<CongestionForecast>
+    val code: Int = 0,
+    val message: String? = null,
+    val data: CongestionData? = null
 )
 
+data class CongestionData(
+    @SerializedName("road_name") val roadName: String? = null,
+    @SerializedName("current_tti") val currentTti: Float = 1.0f,
+    val predictions: List<CongestionPrediction>? = null,
+    val suggestion: String? = null
+)
+
+data class CongestionPrediction(
+    val time: String,
+    val tti: Float
+)
+
+// 兼容旧代码
 data class CongestionForecast(
     val time: String,
     @SerializedName("predicted_tti") val predictedTti: Float,
@@ -256,7 +345,55 @@ data class RoadTraffic(
     val status: String  // "Free Flow", "Slow", "Congested"
 )
 
+data class GateQueuesResponse(
+    val queues: Map<String, Int>? = null
+)
+
+// ==================== 历史记录相关 ====================
+
+data class TripHistoryResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val data: TripHistoryData? = null
+)
+
+data class TripHistoryData(
+    val total: Int = 0,
+    val trips: List<TripHistory>? = null
+)
+
+data class TripHistory(
+    val id: Int,
+    @SerializedName("trip_type") val tripType: String,
+    @SerializedName("trip_number") val tripNumber: String,
+    @SerializedName("trip_date") val tripDate: String,
+    val status: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null
+)
+
 // ==================== 停车预测相关 ====================
+
+data class ParkingListResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val data: ParkingData? = null
+)
+
+data class ParkingData(
+    val parkings: List<ParkingInfo>? = null
+)
+
+data class ParkingInfo(
+    val id: String,
+    val name: String,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @SerializedName("total_spots") val totalSpots: Int = 0,
+    @SerializedName("available_spots") val availableSpots: Int = 0,
+    @SerializedName("predicted_available") val predictedAvailable: Int? = null,
+    val price: String? = null,
+    val distance: Int = 0
+)
 
 data class ParkingPrediction(
     @SerializedName("parking_lot_id") val parkingLotId: String,
