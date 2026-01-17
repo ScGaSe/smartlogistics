@@ -2726,46 +2726,89 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
     var isJoiningShare by remember { mutableStateOf(false) }
     var shareError by remember { mutableStateOf<String?>(null) }
     
+    // ==================== OCR识别开关 ====================
+    // true = 使用模拟数据（无需百度API）
+    // false = 调用百度OCR真实识别
+    val USE_MOCK_OCR = false  // ★ 已启用真实识别
+    
     // 执行OCR识别
     fun performOcrRecognition(imageUri: Uri, currentTripType: String) {
         isRecognizing = true
         recognitionResult = null
         
         scope.launch {
-            delay(1800) // 模拟识别过程
-            
-            // TODO: 调用后端 POST /trips/ocr 接口
-            val mockResult = if (currentTripType == "flight") {
-                TripOcrResult(
-                    tripType = "flight",
-                    tripNumber = "MU${(1000..9999).random()}",
-                    tripDate = "2026-01-${(20..28).random()}",
-                    departureCity = "长沙",
-                    arrivalCity = "北京",
-                    departureTime = "${(6..20).random()}:${listOf("00", "30", "45").random()}",
-                    passengerName = "张*明",
-                    seatInfo = "${(1..30).random()}${listOf("A", "B", "C", "D", "E", "F").random()}",
-                    confidence = 0.92f + (Math.random() * 0.07f).toFloat()
-                )
+            if (USE_MOCK_OCR) {
+                // ==================== Mock模式：返回模拟数据 ====================
+                delay(1500) // 模拟识别过程
+                
+                val mockResult = if (currentTripType == "flight") {
+                    TripOcrResult(
+                        tripType = "flight",
+                        tripNumber = "MU${(1000..9999).random()}",
+                        tripDate = "2026-01-${(20..28).random()}",
+                        departureCity = "长沙",
+                        arrivalCity = "北京",
+                        departureTime = "${(6..20).random()}:${listOf("00", "30", "45").random()}",
+                        passengerName = "张*明",
+                        seatInfo = "${(1..30).random()}${listOf("A", "B", "C", "D", "E", "F").random()}",
+                        confidence = 0.95f
+                    )
+                } else {
+                    TripOcrResult(
+                        tripType = "train",
+                        tripNumber = "${listOf("G", "D", "K", "Z").random()}${(100..9999).random()}",
+                        tripDate = "2026-01-${(20..28).random()}",
+                        departureCity = "长沙南",
+                        arrivalCity = "广州南",
+                        departureTime = "${(6..22).random()}:${listOf("00", "15", "30", "45").random()}",
+                        passengerName = "张*明",
+                        seatInfo = "${(1..16).random()}车${(1..100).random()}${listOf("A", "B", "C", "D", "F").random()}座",
+                        confidence = 0.93f
+                    )
+                }
+                
+                recognitionResult = mockResult
+                tripNumber = mockResult.tripNumber
+                tripDate = mockResult.tripDate
+                tripType = mockResult.tripType
+                isRecognizing = false
+                
             } else {
-                TripOcrResult(
-                    tripType = "train",
-                    tripNumber = "${listOf("G", "D", "K", "Z").random()}${(100..9999).random()}",
-                    tripDate = "2026-01-${(20..28).random()}",
-                    departureCity = "长沙南",
-                    arrivalCity = "广州南",
-                    departureTime = "${(6..22).random()}:${listOf("00", "15", "30", "45").random()}",
-                    passengerName = "张*明",
-                    seatInfo = "${(1..16).random()}车${(1..100).random()}${listOf("A", "B", "C", "D", "F").random()}座",
-                    confidence = 0.89f + (Math.random() * 0.10f).toFloat()
-                )
+                // ==================== 真实模式：调用百度OCR ====================
+                try {
+                    val ocrResult = com.example.smartlogistics.utils.BaiduOcrHelper.recognizeTicket(
+                        context = context,
+                        imageUri = imageUri,
+                        tripType = currentTripType
+                    )
+                    
+                    if (ocrResult.success) {
+                        val result = TripOcrResult(
+                            tripType = ocrResult.tripType,
+                            tripNumber = ocrResult.tripNumber,
+                            tripDate = ocrResult.tripDate,
+                            departureCity = ocrResult.departureStation,
+                            arrivalCity = ocrResult.arrivalStation,
+                            departureTime = ocrResult.departureTime,
+                            passengerName = ocrResult.passengerName,
+                            seatInfo = ocrResult.seatInfo,
+                            confidence = 0.95f
+                        )
+                        
+                        recognitionResult = result
+                        tripNumber = result.tripNumber
+                        tripDate = result.tripDate
+                        tripType = result.tripType
+                    } else {
+                        // 识别失败，显示错误
+                        Toast.makeText(context, ocrResult.errorMsg ?: "识别失败", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "识别异常: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isRecognizing = false
+                }
             }
-            
-            recognitionResult = mockResult
-            tripNumber = mockResult.tripNumber
-            tripDate = mockResult.tripDate
-            tripType = mockResult.tripType
-            isRecognizing = false
         }
     }
     
@@ -2999,10 +3042,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         ) {
                             Icon(imageVector = Icons.Rounded.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = "识别成功！", fontSize = 14.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
-                                Text(text = "置信度: ${String.format("%.1f", recognitionResult!!.confidence * 100)}%", fontSize = 12.sp, color = SuccessGreen.copy(alpha = 0.8f))
-                            }
+                            Text(text = "识别成功！", fontSize = 14.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
                         }
                         
                         Spacer(modifier = Modifier.height(12.dp))
