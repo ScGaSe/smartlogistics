@@ -915,3 +915,44 @@ fun NearbyParkingCard(
         }
     }
 }
+
+// ==================== 交通枢纽卡片 ====================
+@Composable
+fun TransportHubCard(
+    name: String,
+    distance: String,
+    icon: ImageVector,
+    onClick: () -> Unit = {}
+) {
+    Card(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = CarGreen,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = name,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = distance,
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
+        }
+    }
+}

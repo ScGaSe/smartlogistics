@@ -1586,15 +1586,8 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
             primaryColor = TruckOrange
         )
 
+        // 底部留白
         Spacer(modifier = Modifier.height(24.dp))
-
-        // 开始导航按钮
-        PrimaryButton(
-            text = "规划最优路线",
-            onClick = { navController.navigate("navigation_map") },
-            backgroundColor = TruckOrange,
-            icon = Icons.Rounded.Navigation
-        )
     }
 }
 
