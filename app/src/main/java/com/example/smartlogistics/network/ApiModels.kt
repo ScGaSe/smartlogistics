@@ -371,25 +371,24 @@ data class CongestionPrediction(
 
 data class VisionResponse(
     val status: String,
-    @SerializedName("vehicle_type") val vehicleType: String? = null,
-    @SerializedName("vehicle_type_cn") val vehicleTypeCn: String? = null,
-    @SerializedName("vehicle_conf") val vehicleConf: Float? = null,
-    val plates: List<PlateDetection>? = null,
-    val hazmat: List<HazmatDetection>? = null,
-    @SerializedName("is_hazmat") val isHazmat: Boolean = false,
-    @SerializedName("has_plate") val hasPlate: Boolean = false
+    @SerializedName("license_plate") val licensePlate: LicensePlateInfo? = null,
+    @SerializedName("vehicle_type") val vehicleType: VehicleTypeInfo? = null,
+    val hazmat: HazmatInfo? = null
 )
 
-data class PlateDetection(
-    val bbox: List<Int>,
-    val conf: Float,
+data class LicensePlateInfo(
+    val detected: Boolean = false,
     val text: String? = null
 )
 
-data class HazmatDetection(
-    val bbox: List<Int>,
-    val conf: Float,
-    val cls: Int
+data class VehicleTypeInfo(
+    @SerializedName("class") val vehicleClass: String? = null,
+    val confidence: Float? = null
+)
+
+data class HazmatInfo(
+    val detected: Boolean = false,
+    val labels: List<String>? = null
 )
 
 // ==================== 路况相关 ====================

@@ -43,7 +43,6 @@ import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.utils.HazmatRecognitionHelper
 import com.example.smartlogistics.utils.HazmatRecognitionResult
-import com.example.smartlogistics.utils.TFLiteHelper
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.viewmodel.MainViewModel
@@ -63,6 +62,21 @@ import com.amap.api.location.AMapLocation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
+
+// ==================== 车型英文转中文映射 ====================
+private fun mapVehicleTypeToCn(vehicleType: String?): String {
+    return when (vehicleType?.lowercase()) {
+        "truck" -> "货车"
+        "bus" -> "客车"
+        "car", "sedan" -> "轿车"
+        "suv" -> "SUV"
+        "van" -> "面包车"
+        "pickup" -> "皮卡"
+        "motorcycle" -> "摩托车"
+        "minibus" -> "小型客车"
+        else -> vehicleType ?: "未知"
+    }
+}
 
 // ==================== 货运司机主页 ====================
 @Composable
@@ -220,7 +234,9 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
     // ========== 车牌识别状态 ==========
     var isRecognizing by remember { mutableStateOf(false) }
     var recognitionResult by remember { mutableStateOf<String?>(null) }
-    val tfliteHelper = remember { TFLiteHelper(context) }
+
+    // ========== Repository用于调用后端API ==========
+    val repository = remember { com.example.smartlogistics.network.Repository(context) }
 
     // ========== 相机拍照 Uri（重要！FileProvider 需要）==========
     var photoUri by remember { mutableStateOf<Uri?>(null) }
@@ -240,17 +256,60 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             isRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val bitmap = tfliteHelper.loadImageFromUri(it)
-                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
-                    withContext(Dispatchers.Main) {
-                        isRecognizing = false
-                        result?.let { plate ->
-                            plateNumber = plate
-                            recognitionResult = "识别成功: $plate"
-                        } ?: run {
-                            recognitionResult = "识别失败，请重试"
+                    // 将Uri转换为临时文件
+                    val inputStream = context.contentResolver.openInputStream(it)
+                    val tempFile = java.io.File(context.cacheDir, "temp_plate_image.jpg")
+                    inputStream?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
                         }
                     }
+
+                    // 调用后端API识别车牌和车型
+                    when (val result = repository.analyzeVehicleImage(tempFile)) {
+                        is com.example.smartlogistics.network.NetworkResult.Success -> {
+                            val response = result.data
+                            val plate = response.licensePlate?.text
+                            val detectedVehicleType = response.vehicleType?.vehicleClass
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                if (plate != null) {
+                                    plateNumber = plate
+                                    recognitionResult = "识别成功: $plate"
+                                }
+                                // 自动填充车型
+                                detectedVehicleType?.let { vt ->
+                                    vehicleType = vt
+                                    if (plate != null) {
+                                        recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
+                                    }
+                                }
+                                if (plate == null && detectedVehicleType == null) {
+                                    recognitionResult = "未检测到车牌和车型，请重试"
+                                }
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Error -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                recognitionResult = "识别失败: ${result.message}"
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Exception -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                recognitionResult = "网络错误: ${result.throwable.message}"
+                            }
+                        }
+                        else -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                            }
+                        }
+                    }
+
+                    // 清理临时文件
+                    tempFile.delete()
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
@@ -269,17 +328,60 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             isRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val bitmap = tfliteHelper.loadImageFromUri(photoUri!!)
-                    val result = bitmap?.let { bmp -> tfliteHelper.recognizePlate(bmp) }
-                    withContext(Dispatchers.Main) {
-                        isRecognizing = false
-                        result?.let { plate ->
-                            plateNumber = plate
-                            recognitionResult = "识别成功: $plate"
-                        } ?: run {
-                            recognitionResult = "识别失败，请重试"
+                    // 将Uri转换为临时文件
+                    val inputStream = context.contentResolver.openInputStream(photoUri!!)
+                    val tempFile = java.io.File(context.cacheDir, "temp_camera_plate.jpg")
+                    inputStream?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
                         }
                     }
+
+                    // 调用后端API识别车牌和车型
+                    when (val result = repository.analyzeVehicleImage(tempFile)) {
+                        is com.example.smartlogistics.network.NetworkResult.Success -> {
+                            val response = result.data
+                            val plate = response.licensePlate?.text
+                            val detectedVehicleType = response.vehicleType?.vehicleClass
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                if (plate != null) {
+                                    plateNumber = plate
+                                    recognitionResult = "识别成功: $plate"
+                                }
+                                // 自动填充车型
+                                detectedVehicleType?.let { vt ->
+                                    vehicleType = vt
+                                    if (plate != null) {
+                                        recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
+                                    }
+                                }
+                                if (plate == null && detectedVehicleType == null) {
+                                    recognitionResult = "未检测到车牌和车型，请重试"
+                                }
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Error -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                recognitionResult = "识别失败: ${result.message}"
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Exception -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                                recognitionResult = "网络错误: ${result.throwable.message}"
+                            }
+                        }
+                        else -> {
+                            withContext(Dispatchers.Main) {
+                                isRecognizing = false
+                            }
+                        }
+                    }
+
+                    // 清理临时文件
+                    tempFile.delete()
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isRecognizing = false
@@ -334,10 +436,6 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             recognitionResult = null
             viewModel?.resetVehicleState()
         }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { tfliteHelper.close() }
     }
 
     // =====================================================
@@ -2335,7 +2433,6 @@ private fun HistoryRecordCard(
 }
 
 // ==================== 货物报备页面 ====================
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = null) {
     val context = LocalContext.current
@@ -2427,8 +2524,10 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     }
     // ========== 语音识别相关状态结束 ==========
 
+    // ========== Repository用于调用后端API ==========
+    val repository = remember { com.example.smartlogistics.network.Repository(context) }
+
     // ========== 危化品识别相关状态 ==========
-    val hazmatHelper = remember { HazmatRecognitionHelper(context) }
     var isHazmatRecognizing by remember { mutableStateOf(false) }
     var hazmatRecognitionResult by remember { mutableStateOf<HazmatRecognitionResult?>(null) }
 
@@ -2443,16 +2542,60 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             isHazmatRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val bitmap = hazmatHelper.loadImageFromUri(it)
-                    val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
-
-                    withContext(Dispatchers.Main) {
-                        isHazmatRecognizing = false
-                        result?.let { res ->
-                            hazmatRecognitionResult = res
-                            res.hazmatClass?.let { hazardClass = it.name }
+                    // 将Uri转换为临时文件
+                    val inputStream = context.contentResolver.openInputStream(it)
+                    val tempFile = java.io.File(context.cacheDir, "temp_hazmat_image.jpg")
+                    inputStream?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
                         }
                     }
+
+                    // 调用后端API识别
+                    when (val result = repository.analyzeVehicleImage(tempFile)) {
+                        is com.example.smartlogistics.network.NetworkResult.Success -> {
+                            val response = result.data
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                if (response.hazmat?.detected == true && response.hazmat.labels?.isNotEmpty() == true) {
+                                    val labelName = response.hazmat.labels.first()
+                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelName)
+                                    hazmatRecognitionResult = HazmatRecognitionResult(
+                                        hazmatClass = hazmatClass,
+                                        confidence = 0.9f,
+                                        isHazardous = true,
+                                        classIndex = hazmatClass?.code?.toIntOrNull() ?: -1
+                                    )
+                                    hazmatClass?.let { hazardClass = it.name }
+                                } else {
+                                    hazmatRecognitionResult = HazmatRecognitionResult(
+                                        hazmatClass = null,
+                                        confidence = 0f,
+                                        isHazardous = false,
+                                        classIndex = -1
+                                    )
+                                }
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Error -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                Toast.makeText(context, "识别失败: ${result.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Exception -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                Toast.makeText(context, "网络错误: ${result.throwable.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        else -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                            }
+                        }
+                    }
+                    tempFile.delete()
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isHazmatRecognizing = false
@@ -2470,16 +2613,60 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             isHazmatRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val bitmap = hazmatHelper.loadImageFromUri(hazmatPhotoUri!!)
-                    val result = bitmap?.let { bmp -> hazmatHelper.recognizeHazmat(bmp) }
-
-                    withContext(Dispatchers.Main) {
-                        isHazmatRecognizing = false
-                        result?.let { res ->
-                            hazmatRecognitionResult = res
-                            res.hazmatClass?.let { hazardClass = it.name }
+                    // 将Uri转换为临时文件
+                    val inputStream = context.contentResolver.openInputStream(hazmatPhotoUri!!)
+                    val tempFile = java.io.File(context.cacheDir, "temp_hazmat_camera.jpg")
+                    inputStream?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
                         }
                     }
+
+                    // 调用后端API识别
+                    when (val result = repository.analyzeVehicleImage(tempFile)) {
+                        is com.example.smartlogistics.network.NetworkResult.Success -> {
+                            val response = result.data
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                if (response.hazmat?.detected == true && response.hazmat.labels?.isNotEmpty() == true) {
+                                    val labelName = response.hazmat.labels.first()
+                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelName)
+                                    hazmatRecognitionResult = HazmatRecognitionResult(
+                                        hazmatClass = hazmatClass,
+                                        confidence = 0.9f,
+                                        isHazardous = true,
+                                        classIndex = hazmatClass?.code?.toIntOrNull() ?: -1
+                                    )
+                                    hazmatClass?.let { hazardClass = it.name }
+                                } else {
+                                    hazmatRecognitionResult = HazmatRecognitionResult(
+                                        hazmatClass = null,
+                                        confidence = 0f,
+                                        isHazardous = false,
+                                        classIndex = -1
+                                    )
+                                }
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Error -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                Toast.makeText(context, "识别失败: ${result.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Exception -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                                Toast.makeText(context, "网络错误: ${result.throwable.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        else -> {
+                            withContext(Dispatchers.Main) {
+                                isHazmatRecognizing = false
+                            }
+                        }
+                    }
+                    tempFile.delete()
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isHazmatRecognizing = false
@@ -2513,7 +2700,6 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     DisposableEffect(Unit) {
         onDispose {
             speechHelper.destroy()
-            hazmatHelper.close()  // 添加这行
         }
     }
     // ========== 危化品识别相关状态结束 ==========
@@ -2784,98 +2970,13 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 危化品分类下拉选择器
-                    Text(
-                        text = "危化品分类",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextSecondary
+                    // 手动输入（识别后可修改）
+                    StyledTextField(
+                        value = hazardClass,
+                        onValueChange = { hazardClass = it },
+                        label = "危化品类别（可手动修改）",
+                        leadingIcon = Icons.Rounded.Warning
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    var hazardDropdownExpanded by remember { mutableStateOf(false) }
-                    val hazmatClasses = HazmatRecognitionHelper.HAZMAT_CLASSES.values.toList()
-
-                    ExposedDropdownMenuBox(
-                        expanded = hazardDropdownExpanded,
-                        onExpandedChange = { hazardDropdownExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = hazardClass,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("选择危化品分类") },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.Warning,
-                                    contentDescription = null,
-                                    tint = ErrorRed
-                                )
-                            },
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = hazardDropdownExpanded)
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ErrorRed,
-                                unfocusedBorderColor = DividerColor,
-                                focusedLabelColor = ErrorRed
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        ExposedDropdownMenu(
-                            expanded = hazardDropdownExpanded,
-                            onDismissRequest = { hazardDropdownExpanded = false }
-                        ) {
-                            hazmatClasses.forEach { hazmat ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            // 分类图标/编号
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .background(
-                                                        Color(hazmat.colorInt),
-                                                        RoundedCornerShape(6.dp)
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = hazmat.icon,
-                                                    fontSize = 16.sp
-                                                )
-                                            }
-                                            Column {
-                                                Text(
-                                                    text = hazmat.name,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = TextPrimary
-                                                )
-                                                Text(
-                                                    text = hazmat.englishName,
-                                                    fontSize = 11.sp,
-                                                    color = TextTertiary
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        hazardClass = hazmat.name
-                                        hazardDropdownExpanded = false
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                                )
-                            }
-                        }
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
