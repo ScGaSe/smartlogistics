@@ -21,7 +21,7 @@ object RetrofitClient {
     // 真实后端地址
     // Android模拟器访问本机用 10.0.2.2
     // 真机调试用电脑局域网IP，如 192.168.1.100
-    private const val REAL_BASE_URL = "http://10.0.2.2:8000/"
+    private const val REAL_BASE_URL = "http://192.168.31.4:8000/"
 
     private var baseUrl = MOCK_BASE_URL
     private var retrofit: Retrofit? = null
