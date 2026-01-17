@@ -2393,24 +2393,97 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
         )
     }
 }
-
 // ==================== 历史数据页面 ====================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    // 模拟历史数据
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember { mutableStateOf(1) } // 默认选中"本月"
     val tabs = listOf("本周", "本月", "全部")
 
-    val historyRecords = remember {
+    // 获取当前日期用于筛选
+    val currentDate = remember { java.time.LocalDate.now() }
+
+    // 完整的历史数据（模拟更多数据）
+    val allHistoryRecords = remember {
         listOf(
-            CarHistoryRecord("2024-12-15", "家 → T2航站楼", 28.5, "42分钟", "接人"),
-            CarHistoryRecord("2024-12-14", "T1航站楼 → 万达广场", 15.2, "25分钟", "日常"),
-            CarHistoryRecord("2024-12-13", "公司 → 家", 18.0, "35分钟", "通勤"),
-            CarHistoryRecord("2024-12-12", "家 → 高铁站", 22.3, "38分钟", "送人"),
-            CarHistoryRecord("2024-12-11", "银泰商场 → 家", 12.5, "20分钟", "日常"),
-            CarHistoryRecord("2024-12-10", "家 → 公司", 18.0, "32分钟", "通勤"),
-            CarHistoryRecord("2024-12-09", "机场高速 → 市区", 35.0, "55分钟", "日常")
+            // 本周数据（最近7天）
+            CarHistoryRecord(currentDate.minusDays(0).toString(), "家 → T2航站楼", 28.5, "42分钟", "接人"),
+            CarHistoryRecord(currentDate.minusDays(1).toString(), "T1航站楼 → 万达广场", 15.2, "25分钟", "日常"),
+            CarHistoryRecord(currentDate.minusDays(2).toString(), "公司 → 家", 18.0, "35分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(3).toString(), "家 → 高铁站", 22.3, "38分钟", "送人"),
+            CarHistoryRecord(currentDate.minusDays(4).toString(), "银泰商场 → 家", 12.5, "20分钟", "日常"),
+            CarHistoryRecord(currentDate.minusDays(5).toString(), "家 → 公司", 18.0, "32分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(6).toString(), "机场高速 → 市区", 35.0, "55分钟", "日常"),
+            // 本月数据（7-30天前）
+            CarHistoryRecord(currentDate.minusDays(8).toString(), "家 → 公司", 18.0, "30分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(10).toString(), "超市 → 家", 5.2, "12分钟", "日常"),
+            CarHistoryRecord(currentDate.minusDays(12).toString(), "家 → 医院", 8.5, "18分钟", "其他"),
+            CarHistoryRecord(currentDate.minusDays(15).toString(), "公司 → 家", 18.0, "35分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(18).toString(), "家 → 火车站", 25.0, "40分钟", "送人"),
+            CarHistoryRecord(currentDate.minusDays(20).toString(), "商场 → 家", 10.0, "22分钟", "日常"),
+            CarHistoryRecord(currentDate.minusDays(22).toString(), "家 → 公司", 18.0, "28分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(25).toString(), "机场 → 家", 32.0, "48分钟", "接人"),
+            CarHistoryRecord(currentDate.minusDays(28).toString(), "家 → 公司", 18.0, "33分钟", "通勤"),
+            // 更早的数据（30天以上）
+            CarHistoryRecord(currentDate.minusDays(35).toString(), "家 → 景区", 45.0, "60分钟", "其他"),
+            CarHistoryRecord(currentDate.minusDays(40).toString(), "公司 → 家", 18.0, "30分钟", "通勤"),
+            CarHistoryRecord(currentDate.minusDays(45).toString(), "家 → 高铁站", 22.3, "35分钟", "送人"),
+            CarHistoryRecord(currentDate.minusDays(50).toString(), "朋友家 → 家", 15.0, "25分钟", "日常"),
+            CarHistoryRecord(currentDate.minusDays(60).toString(), "家 → 公司", 18.0, "32分钟", "通勤")
         )
+    }
+
+    // 根据选中的Tab筛选数据
+    val filteredRecords = remember(selectedTab, allHistoryRecords) {
+        when (selectedTab) {
+            0 -> { // 本周（本周一到今天）
+                val startOfWeek = currentDate.with(java.time.DayOfWeek.MONDAY)
+                allHistoryRecords.filter {
+                    val recordDate = java.time.LocalDate.parse(it.date)
+                    recordDate >= startOfWeek && recordDate <= currentDate
+                }
+            }
+            1 -> { // 本月（本月1号到今天）
+                val startOfMonth = currentDate.withDayOfMonth(1)
+                allHistoryRecords.filter {
+                    val recordDate = java.time.LocalDate.parse(it.date)
+                    recordDate >= startOfMonth && recordDate <= currentDate
+                }
+            }
+            else -> allHistoryRecords // 全部
+        }
+    }
+
+    // 根据筛选后的数据计算统计
+    val stats = remember(filteredRecords) {
+        val totalTrips = filteredRecords.size
+        val totalDistance = filteredRecords.sumOf { it.distance }
+        val totalMinutes = filteredRecords.sumOf {
+            it.duration.replace("分钟", "").toIntOrNull() ?: 0
+        }
+        val totalHours = totalMinutes / 60
+
+        val commuteCount = filteredRecords.count { it.tripType == "通勤" }
+        val dailyCount = filteredRecords.count { it.tripType == "日常" }
+        val pickupCount = filteredRecords.count { it.tripType == "接人" || it.tripType == "送人" }
+        val otherCount = filteredRecords.count { it.tripType == "其他" }
+
+        CarHistoryStats(
+            totalTrips = totalTrips,
+            totalDistance = totalDistance.toInt(),
+            totalHours = if (totalHours > 0) "${totalHours}h" else "${totalMinutes}min",
+            commuteCount = commuteCount,
+            dailyCount = dailyCount,
+            pickupCount = pickupCount,
+            otherCount = otherCount
+        )
+    }
+
+    // 统计卡片标题
+    val statsTitle = when (selectedTab) {
+        0 -> "本周出行统计"
+        1 -> "本月出行统计"
+        else -> "全部出行统计"
     }
 
     DetailScreenTemplate(
@@ -2426,7 +2499,7 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "本月出行统计",
+                    text = statsTitle,
                     color = Color.White.copy(alpha = 0.9f),
                     fontSize = 14.sp
                 )
@@ -2437,9 +2510,9 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    CarStatItem(value = "28", label = "出行次数")
-                    CarStatItem(value = "486", label = "总里程(km)")
-                    CarStatItem(value = "15h", label = "行驶时长")
+                    CarStatItem(value = "${stats.totalTrips}", label = "出行次数")
+                    CarStatItem(value = "${stats.totalDistance}", label = "总里程(km)")
+                    CarStatItem(value = stats.totalHours, label = "行驶时长")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -2453,69 +2526,80 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    CarStatItem(value = "12", label = "通勤")
-                    CarStatItem(value = "8", label = "日常出行")
-                    CarStatItem(value = "5", label = "接送人")
-                    CarStatItem(value = "3", label = "其他")
+                    CarStatItem(value = "${stats.commuteCount}", label = "通勤")
+                    CarStatItem(value = "${stats.dailyCount}", label = "日常出行")
+                    CarStatItem(value = "${stats.pickupCount}", label = "接送人")
+                    CarStatItem(value = "${stats.otherCount}", label = "其他")
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 出行趋势（简化图表）
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "本周出行趋势",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
-                )
+        // 出行趋势（简化图表）- 只在本周Tab显示
+        if (selectedTab == 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "本周出行趋势",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                // 简单的柱状图
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    val weekData = listOf(45, 30, 60, 25, 80, 55, 40)
-                    val days = listOf("一", "二", "三", "四", "五", "六", "日")
+                    // 根据实际数据生成柱状图
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        val days = listOf("一", "二", "三", "四", "五", "六", "日")
+                        // 计算每天的出行距离
+                        val weekData = (0..6).map { dayOffset ->
+                            val targetDate = currentDate.minusDays((6 - dayOffset).toLong())
+                            filteredRecords
+                                .filter { java.time.LocalDate.parse(it.date) == targetDate }
+                                .sumOf { it.distance }
+                                .toInt()
+                        }
+                        val maxValue = (weekData.maxOrNull() ?: 1).coerceAtLeast(1)
 
-                    weekData.forEachIndexed { index, value ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(24.dp)
-                                    .height((value * 0.8).dp)
-                                    .background(
-                                        CarGreen.copy(alpha = 0.7f + index * 0.04f),
-                                        RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
-                                    )
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = days[index],
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
+                        weekData.forEachIndexed { index, value ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                val barHeight = if (maxValue > 0) (value * 70 / maxValue).coerceAtLeast(if (value > 0) 5 else 0) else 0
+                                Box(
+                                    modifier = Modifier
+                                        .width(24.dp)
+                                        .height(barHeight.dp)
+                                        .background(
+                                            CarGreen.copy(alpha = 0.7f + index * 0.04f),
+                                            RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                        )
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = days[index],
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+        }
 
         // Tab 选择器
         Row(
@@ -2542,36 +2626,73 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 历史记录列表
-        Text(
-            text = "出行记录",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
+        // 历史记录列表标题
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "出行记录",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary
+            )
+            Text(
+                text = "共 ${filteredRecords.size} 条",
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        historyRecords.forEach { record ->
-            CarHistoryRecordCard(
-                record = record,
-                primaryColor = CarGreen
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        // 加载更多
-        TextButton(
-            onClick = { /* TODO: 加载更多 */ },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = "加载更多记录",
-                color = CarGreen
-            )
+        // 列表内容
+        if (filteredRecords.isEmpty()) {
+            // 空状态
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "暂无出行记录",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        } else {
+            filteredRecords.forEach { record ->
+                CarHistoryRecordCard(
+                    record = record,
+                    primaryColor = CarGreen
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
     }
 }
+
+// ==================== 私家车历史统计数据类（新增）====================
+data class CarHistoryStats(
+    val totalTrips: Int,
+    val totalDistance: Int,
+    val totalHours: String,
+    val commuteCount: Int,
+    val dailyCount: Int,
+    val pickupCount: Int,
+    val otherCount: Int
+)
 
 // ==================== 私家车历史记录数据模型 ====================
 data class CarHistoryRecord(

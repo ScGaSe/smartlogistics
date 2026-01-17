@@ -1601,19 +1601,93 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
 // ==================== 历史数据页面 ====================
 @Composable
 fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    // 模拟历史数据
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember { mutableStateOf(0) } // 默认选中"本周"
     val tabs = listOf("本周", "本月", "全部")
 
-    val historyRecords = remember {
+    // 获取当前日期用于筛选
+    val currentDate = remember { java.time.LocalDate.now() }
+
+    // 完整的历史数据（模拟更多数据）
+    val allHistoryRecords = remember {
         listOf(
-            HistoryRecord("2024-12-15", "3号仓库 → 北门出口", "普通货物", 15.5, "32分钟", "已完成"),
-            HistoryRecord("2024-12-14", "危化品区 → 南门闸口", "危险品", 8.2, "28分钟", "已完成"),
-            HistoryRecord("2024-12-14", "集装箱堆场 → 2号仓库", "集装箱", 12.0, "45分钟", "已完成"),
-            HistoryRecord("2024-12-13", "冷链区 → 北门出口", "冷链货物", 18.3, "38分钟", "已完成"),
-            HistoryRecord("2024-12-12", "1号仓库 → 3号仓库", "普通货物", 5.5, "15分钟", "已完成"),
-            HistoryRecord("2024-12-11", "南门入口 → 危化品区", "危险品", 10.8, "35分钟", "已完成")
+            // 本周数据（最近7天）
+            HistoryRecord(currentDate.minusDays(0).toString(), "3号仓库 → 北门出口", "普通货物", 15.5, "32分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(1).toString(), "危化品区 → 南门闸口", "危险品", 8.2, "28分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(1).toString(), "集装箱堆场 → 2号仓库", "集装箱", 12.0, "45分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(2).toString(), "冷链区 → 北门出口", "冷链货物", 18.3, "38分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(3).toString(), "1号仓库 → 3号仓库", "普通货物", 5.5, "15分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(4).toString(), "南门入口 → 危化品区", "危险品", 10.8, "35分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(5).toString(), "2号仓库 → 北门出口", "普通货物", 8.0, "22分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(6).toString(), "冷链区 → 1号仓库", "冷链货物", 6.5, "18分钟", "已完成"),
+            // 本月数据（7-30天前）
+            HistoryRecord(currentDate.minusDays(8).toString(), "3号仓库 → 南门出口", "普通货物", 12.0, "28分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(10).toString(), "危化品区 → 北门闸口", "危险品", 9.5, "30分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(12).toString(), "集装箱堆场 → 3号仓库", "集装箱", 10.0, "35分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(15).toString(), "1号仓库 → 冷链区", "冷链货物", 7.0, "20分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(18).toString(), "2号仓库 → 危化品区", "危险品", 11.0, "32分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(20).toString(), "北门入口 → 1号仓库", "普通货物", 6.0, "18分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(22).toString(), "冷链区 → 南门出口", "冷链货物", 15.0, "40分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(25).toString(), "3号仓库 → 集装箱堆场", "集装箱", 8.5, "25分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(28).toString(), "危化品区 → 2号仓库", "危险品", 7.5, "22分钟", "已完成"),
+            // 更早的数据（30天以上）
+            HistoryRecord(currentDate.minusDays(35).toString(), "1号仓库 → 南门出口", "普通货物", 14.0, "35分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(40).toString(), "冷链区 → 3号仓库", "冷链货物", 9.0, "26分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(45).toString(), "集装箱堆场 → 北门出口", "集装箱", 16.0, "42分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(50).toString(), "危化品区 → 1号仓库", "危险品", 8.0, "24分钟", "已完成"),
+            HistoryRecord(currentDate.minusDays(60).toString(), "2号仓库 → 冷链区", "冷链货物", 5.0, "15分钟", "已完成")
         )
+    }
+
+    // 根据选中的Tab筛选数据
+    val filteredRecords = remember(selectedTab, allHistoryRecords) {
+        when (selectedTab) {
+            0 -> { // 本周（本周一到今天）
+                val startOfWeek = currentDate.with(java.time.DayOfWeek.MONDAY)
+                allHistoryRecords.filter {
+                    val recordDate = java.time.LocalDate.parse(it.date)
+                    recordDate >= startOfWeek && recordDate <= currentDate
+                }
+            }
+            1 -> { // 本月（本月1号到今天）
+                val startOfMonth = currentDate.withDayOfMonth(1)
+                allHistoryRecords.filter {
+                    val recordDate = java.time.LocalDate.parse(it.date)
+                    recordDate >= startOfMonth && recordDate <= currentDate
+                }
+            }
+            else -> allHistoryRecords // 全部
+        }
+    }
+    // 根据筛选后的数据计算统计
+    val stats = remember(filteredRecords) {
+        val totalOrders = filteredRecords.size
+        val totalDistance = filteredRecords.sumOf { it.distance }
+
+        // 计算准时率（模拟：已完成的都算准时）
+        val onTimeCount = filteredRecords.count { it.status == "已完成" }
+        val onTimeRate = if (totalOrders > 0) (onTimeCount * 100 / totalOrders) else 0
+
+        val normalCount = filteredRecords.count { it.cargoType == "普通货物" }
+        val coldChainCount = filteredRecords.count { it.cargoType == "冷链货物" }
+        val hazardousCount = filteredRecords.count { it.cargoType == "危险品" }
+        val containerCount = filteredRecords.count { it.cargoType == "集装箱" }
+
+        TruckHistoryStats(
+            totalOrders = totalOrders,
+            totalDistance = totalDistance.toInt(),
+            onTimeRate = onTimeRate,
+            normalCount = normalCount,
+            coldChainCount = coldChainCount,
+            hazardousCount = hazardousCount,
+            containerCount = containerCount
+        )
+    }
+
+    // 统计卡片标题
+    val statsTitle = when (selectedTab) {
+        0 -> "本周运输统计"
+        1 -> "本月运输统计"
+        else -> "全部运输统计"
     }
 
     DetailScreenTemplate(
@@ -1629,7 +1703,7 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "本月运输统计",
+                    text = statsTitle,
                     color = Color.White.copy(alpha = 0.9f),
                     fontSize = 14.sp
                 )
@@ -1640,9 +1714,9 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    StatItem(value = "156", label = "运输单数", color = Color.White)
-                    StatItem(value = "2,486", label = "总里程(km)", color = Color.White)
-                    StatItem(value = "98%", label = "准时率", color = Color.White)
+                    StatItem(value = "${stats.totalOrders}", label = "运输单数", color = Color.White)
+                    StatItem(value = "${stats.totalDistance}", label = "总里程(km)", color = Color.White)
+                    StatItem(value = "${stats.onTimeRate}%", label = "准时率", color = Color.White)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1655,9 +1729,9 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    StatItem(value = "45", label = "普通货物", color = Color.White)
-                    StatItem(value = "28", label = "冷链货物", color = Color.White)
-                    StatItem(value = "12", label = "危险品", color = Color.White)
+                    StatItem(value = "${stats.normalCount}", label = "普通货物", color = Color.White)
+                    StatItem(value = "${stats.coldChainCount}", label = "冷链货物", color = Color.White)
+                    StatItem(value = "${stats.hazardousCount}", label = "危险品", color = Color.White)
                 }
             }
         }
@@ -1689,37 +1763,87 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 历史记录列表
-        Text(
-            text = "运输记录",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
+        // 历史记录列表标题
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "运输记录",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary
+            )
+            Text(
+                text = "共 ${filteredRecords.size} 条",
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        historyRecords.forEach { record ->
-            HistoryRecordCard(
-                record = record,
-                primaryColor = TruckOrange,
-                isHazardous = record.cargoType == "危险品"
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+        // 列表内容
+        if (filteredRecords.isEmpty()) {
+            // 空状态
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "暂无运输记录",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        } else {
+            filteredRecords.forEach { record ->
+                HistoryRecordCard(
+                    record = record,
+                    primaryColor = TruckOrange,
+                    isHazardous = record.cargoType == "危险品"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
 
-        // 加载更多
-        TextButton(
-            onClick = { /* TODO: 加载更多 */ },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = "加载更多记录",
-                color = TruckOrange
-            )
+        // 加载更多（可选）
+        if (filteredRecords.size >= 5) {
+            TextButton(
+                onClick = { /* TODO: 加载更多 */ },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "加载更多记录",
+                    color = TruckOrange
+                )
+            }
         }
     }
 }
+
+// ==================== 货车历史统计数据类（新增）====================
+data class TruckHistoryStats(
+    val totalOrders: Int,
+    val totalDistance: Int,
+    val onTimeRate: Int,
+    val normalCount: Int,
+    val coldChainCount: Int,
+    val hazardousCount: Int,
+    val containerCount: Int = 0
+)
 
 // ==================== 历史记录数据模型 ====================
 data class HistoryRecord(
