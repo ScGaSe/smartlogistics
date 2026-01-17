@@ -2335,6 +2335,7 @@ private fun HistoryRecordCard(
 }
 
 // ==================== 货物报备页面 ====================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = null) {
     val context = LocalContext.current
@@ -2783,13 +2784,98 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 手动输入（识别后可修改）
-                    StyledTextField(
-                        value = hazardClass,
-                        onValueChange = { hazardClass = it },
-                        label = "危化品类别（可手动修改）",
-                        leadingIcon = Icons.Rounded.Warning
+                    // 危化品分类下拉选择器
+                    Text(
+                        text = "危化品分类",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    var hazardDropdownExpanded by remember { mutableStateOf(false) }
+                    val hazmatClasses = HazmatRecognitionHelper.HAZMAT_CLASSES.values.toList()
+
+                    ExposedDropdownMenuBox(
+                        expanded = hazardDropdownExpanded,
+                        onExpandedChange = { hazardDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = hazardClass,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("选择危化品分类") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Warning,
+                                    contentDescription = null,
+                                    tint = ErrorRed
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = hazardDropdownExpanded)
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = ErrorRed,
+                                unfocusedBorderColor = DividerColor,
+                                focusedLabelColor = ErrorRed
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = hazardDropdownExpanded,
+                            onDismissRequest = { hazardDropdownExpanded = false }
+                        ) {
+                            hazmatClasses.forEach { hazmat ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            // 分类图标/编号
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .background(
+                                                        Color(hazmat.colorInt),
+                                                        RoundedCornerShape(6.dp)
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = hazmat.icon,
+                                                    fontSize = 16.sp
+                                                )
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = hazmat.name,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = TextPrimary
+                                                )
+                                                Text(
+                                                    text = hazmat.englishName,
+                                                    fontSize = 11.sp,
+                                                    color = TextTertiary
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        hazardClass = hazmat.name
+                                        hazardDropdownExpanded = false
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
