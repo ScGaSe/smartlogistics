@@ -131,19 +131,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 登录方法 - 使用用户选择的角色
+     * 登录方法 - 登录后校验角色是否匹配
      */
-    fun login(username: String, password: String, role: String) {
+    fun login(username: String, password: String, selectedRole: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            _userRole.value = role
 
             when (val result = repository.login(username, password)) {
                 is NetworkResult.Success -> {
-                    _isLoggedIn.value = true
-                    _userInfo.value = result.data.userInfo
-                    val targetHome = if (role == "professional") "truck_home" else "car_home"
-                    _authState.value = AuthState.LoginSuccess(targetHome)
+                    val userInfo = result.data.userInfo
+                    val actualRole = userInfo?.role ?: "personal"
+                    val targetHome = if (actualRole == "professional") "truck_home" else "car_home"
+                    
+                    // 检查用户选择的角色与账号实际角色是否匹配
+                    if (selectedRole == actualRole) {
+                        // 角色匹配，正常登录
+                        _isLoggedIn.value = true
+                        _userInfo.value = userInfo
+                        _userRole.value = actualRole
+                        _authState.value = AuthState.LoginSuccess(targetHome)
+                    } else {
+                        // 角色不匹配，提示用户
+                        _userInfo.value = userInfo  // 暂存用户信息
+                        _authState.value = AuthState.RoleMismatch(
+                            selectedRole = selectedRole,
+                            actualRole = actualRole,
+                            targetHome = targetHome
+                        )
+                    }
                 }
                 is NetworkResult.Error -> {
                     _authState.value = AuthState.Error(result.message)
@@ -153,6 +168,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 else -> {}
             }
+        }
+    }
+    
+    /**
+     * 确认使用实际角色登录（角色不匹配时用户选择切换）
+     */
+    fun confirmLoginWithActualRole(actualRole: String, targetHome: String) {
+        _isLoggedIn.value = true
+        _userRole.value = actualRole
+        _authState.value = AuthState.LoginSuccess(targetHome)
+    }
+    
+    /**
+     * 取消登录（角色不匹配时用户选择不切换）
+     */
+    fun cancelMismatchedLogin() {
+        _userInfo.value = null
+        _authState.value = AuthState.Idle
+        // 清除已保存的 token
+        viewModelScope.launch {
+            repository.logout()
         }
     }
 
@@ -497,6 +533,18 @@ sealed class AuthState {
     object CodeSent : AuthState()           // 验证码已发送
     object ResetPasswordSuccess : AuthState() // 密码重置成功
     data class Error(val message: String) : AuthState()
+    
+    /**
+     * 角色不匹配状态
+     * @param selectedRole 用户选择的角色
+     * @param actualRole 账号实际角色
+     * @param targetHome 实际角色对应的首页路由
+     */
+    data class RoleMismatch(
+        val selectedRole: String,
+        val actualRole: String,
+        val targetHome: String
+    ) : AuthState()
 }
 
 sealed class VehicleState {
