@@ -24,12 +24,13 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
+import com.example.smartlogistics.viewmodel.AuthState
 import com.example.smartlogistics.viewmodel.MainViewModel
 
 /**
  * 忘记密码/找回密码页面
  *
- * 流程：输入手机号 → 获取验证码 → 输入验证码+新密码 → 完成
+ * 流程：输入手机号 → 获取验证码 → 输入验证码+新密码 → 重置成功
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,6 +40,9 @@ fun ForgotPasswordScreen(
 ) {
     val context = LocalContext.current
 
+    // 监听认证状态
+    val authState by viewModel?.authState?.collectAsState() ?: remember { mutableStateOf(AuthState.Idle) }
+
     // 输入状态
     var phoneNumber by remember { mutableStateOf("") }
     var verificationCode by remember { mutableStateOf("") }
@@ -46,7 +50,6 @@ fun ForgotPasswordScreen(
     var confirmPassword by remember { mutableStateOf("") }
 
     // UI状态
-    var isLoading by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var showSuccess by remember { mutableStateOf(false) }
@@ -54,6 +57,9 @@ fun ForgotPasswordScreen(
     // 验证码倒计时
     var countdown by remember { mutableIntStateOf(0) }
     var isCodeSent by remember { mutableStateOf(false) }
+
+    // 是否正在加载
+    val isLoading = authState is AuthState.Loading
 
     // 倒计时效果
     LaunchedEffect(countdown) {
@@ -63,7 +69,44 @@ fun ForgotPasswordScreen(
         }
     }
 
-    // 发送验证码（Mock）
+    // 监听认证状态变化
+    LaunchedEffect(authState) {
+        when (authState) {
+            is AuthState.CodeSent -> {
+                // 验证码发送成功
+                isCodeSent = true
+                countdown = 60
+                showError = false
+                Toast.makeText(context, "验证码已发送到 $phoneNumber", Toast.LENGTH_SHORT).show()
+            }
+            is AuthState.ResetPasswordSuccess -> {
+                // 密码重置成功
+                showError = false
+                showSuccess = true
+                Toast.makeText(context, "密码重置成功！", Toast.LENGTH_SHORT).show()
+
+                // 延迟返回登录页
+                kotlinx.coroutines.delay(1500)
+                viewModel?.resetAuthState()
+                navController.popBackStack()
+            }
+            is AuthState.Error -> {
+                // 显示错误信息
+                showError = true
+                errorMessage = (authState as AuthState.Error).message
+            }
+            else -> {}
+        }
+    }
+
+    // 页面退出时重置状态
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel?.resetAuthState()
+        }
+    }
+
+    // 发送验证码
     fun sendVerificationCode() {
         if (phoneNumber.length != 11) {
             showError = true
@@ -71,16 +114,20 @@ fun ForgotPasswordScreen(
             return
         }
 
-        // Mock: 模拟发送验证码
-        isCodeSent = true
-        countdown = 60
-        Toast.makeText(context, "验证码已发送到 $phoneNumber", Toast.LENGTH_SHORT).show()
+        showError = false
 
-        // TODO: 实际调用后端接口
-        // viewModel?.sendVerificationCode(phoneNumber)
+        if (viewModel != null) {
+            // 调用真实接口
+            viewModel.sendVerificationCode(phoneNumber)
+        } else {
+            // Mock模式（无ViewModel时）
+            isCodeSent = true
+            countdown = 60
+            Toast.makeText(context, "验证码已发送到 $phoneNumber (Mock)", Toast.LENGTH_SHORT).show()
+        }
     }
 
-    // 重置密码（Mock）
+    // 重置密码
     fun resetPassword() {
         // 表单验证
         when {
@@ -101,23 +148,19 @@ fun ForgotPasswordScreen(
                 errorMessage = "两次输入的密码不一致"
             }
             else -> {
-                isLoading = true
                 showError = false
 
-                // Mock: 模拟重置密码成功
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    isLoading = false
+                if (viewModel != null) {
+                    // 调用真实接口
+                    viewModel.resetPassword(phoneNumber, verificationCode, newPassword)
+                } else {
+                    // Mock模式
                     showSuccess = true
-                    Toast.makeText(context, "密码重置成功！", Toast.LENGTH_SHORT).show()
-
-                    // 延迟返回登录页
+                    Toast.makeText(context, "密码重置成功！(Mock)", Toast.LENGTH_SHORT).show()
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         navController.popBackStack()
                     }, 1500)
-                }, 1500)
-
-                // TODO: 实际调用后端接口
-                // viewModel?.resetPassword(phoneNumber, verificationCode, newPassword)
+                }
             }
         }
     }
@@ -257,7 +300,8 @@ fun ForgotPasswordScreen(
                         },
                         label = "手机号",
                         leadingIcon = Icons.Default.Phone,
-                        keyboardType = KeyboardType.Phone
+                        keyboardType = KeyboardType.Phone,
+                        enabled = !isLoading
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -280,14 +324,15 @@ fun ForgotPasswordScreen(
                                 },
                                 label = "验证码",
                                 leadingIcon = Icons.Default.Sms,
-                                keyboardType = KeyboardType.Number
+                                keyboardType = KeyboardType.Number,
+                                enabled = !isLoading
                             )
                         }
 
                         // 获取验证码按钮
                         OutlinedButton(
                             onClick = { sendVerificationCode() },
-                            enabled = countdown == 0 && phoneNumber.length == 11,
+                            enabled = countdown == 0 && phoneNumber.length == 11 && !isLoading,
                             modifier = Modifier
                                 .height(48.dp)
                                 .width(100.dp),
@@ -298,16 +343,24 @@ fun ForgotPasswordScreen(
                             ),
                             border = BorderStroke(
                                 width = 1.dp,
-                                color = if (countdown == 0 && phoneNumber.length == 11)
+                                color = if (countdown == 0 && phoneNumber.length == 11 && !isLoading)
                                     BrandBlue else Color.Gray.copy(alpha = 0.3f)
                             )
                         ) {
-                            Text(
-                                text = if (countdown > 0) "${countdown}s" else "获取验证码",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
+                            if (isLoading && !isCodeSent) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = BrandBlue
+                                )
+                            } else {
+                                Text(
+                                    text = if (countdown > 0) "${countdown}s" else "获取验证码",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
 
@@ -322,7 +375,8 @@ fun ForgotPasswordScreen(
                         },
                         label = "新密码",
                         leadingIcon = Icons.Default.Lock,
-                        isPassword = true
+                        isPassword = true,
+                        enabled = !isLoading
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -339,7 +393,8 @@ fun ForgotPasswordScreen(
                         isPassword = true,
                         isError = confirmPassword.isNotEmpty() && newPassword != confirmPassword,
                         errorMessage = if (confirmPassword.isNotEmpty() && newPassword != confirmPassword)
-                            "两次输入的密码不一致" else null
+                            "两次输入的密码不一致" else null,
+                        enabled = !isLoading
                     )
 
                     // 错误提示
@@ -414,12 +469,13 @@ fun ForgotPasswordScreen(
                     PrimaryButton(
                         text = "重置密码",
                         onClick = { resetPassword() },
-                        isLoading = isLoading,
+                        isLoading = isLoading && isCodeSent,
                         enabled = phoneNumber.isNotEmpty() &&
                                 verificationCode.isNotEmpty() &&
                                 newPassword.isNotEmpty() &&
                                 confirmPassword.isNotEmpty() &&
-                                !showSuccess,
+                                !showSuccess &&
+                                !isLoading,
                         backgroundColor = BrandBlue
                     )
 

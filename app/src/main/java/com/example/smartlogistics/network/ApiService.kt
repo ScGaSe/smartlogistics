@@ -27,6 +27,12 @@ interface ApiService {
         @Field("client_secret") clientSecret: String = "string"
     ): Response<LoginResponse>
 
+    @POST("auth/send-code")
+    suspend fun sendVerificationCode(@Body request: SendCodeRequest): Response<SendCodeResponse>
+
+    @POST("auth/reset-password")
+    suspend fun resetPassword(@Body request: ResetPasswordRequest): Response<ResetPasswordResponse>
+
     @GET("auth/me")
     suspend fun getCurrentUser(): Response<UserInfo>
 

@@ -124,6 +124,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ==================== 找回密码相关 ====================
+
+    /**
+     * 发送验证码
+     */
+    fun sendVerificationCode(phoneNumber: String) {
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+            when (val result = repository.sendVerificationCode(phoneNumber)) {
+                is NetworkResult.Success -> {
+                    _authState.value = AuthState.CodeSent
+                }
+                is NetworkResult.Error -> {
+                    _authState.value = AuthState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _authState.value = AuthState.Error(result.throwable.message ?: "发送验证码失败")
+                }
+                is NetworkResult.Loading -> { /* 忽略 */ }
+            }
+        }
+    }
+
+    /**
+     * 重置密码
+     */
+    fun resetPassword(phoneNumber: String, code: String, newPassword: String) {
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+            when (val result = repository.resetPassword(phoneNumber, code, newPassword)) {
+                is NetworkResult.Success -> {
+                    _authState.value = AuthState.ResetPasswordSuccess
+                }
+                is NetworkResult.Error -> {
+                    _authState.value = AuthState.Error(result.message)
+                }
+                is NetworkResult.Exception -> {
+                    _authState.value = AuthState.Error(result.throwable.message ?: "密码重置失败")
+                }
+                is NetworkResult.Loading -> { /* 忽略 */ }
+            }
+        }
+    }
+
     fun logout() {
         // ⭐ 登出时断开用户通知WebSocket
         NotificationService.getInstance().disconnect()
@@ -418,6 +462,8 @@ sealed class AuthState {
     object Loading : AuthState()
     object RegisterSuccess : AuthState()
     data class LoginSuccess(val targetHome: String) : AuthState()
+    object CodeSent : AuthState()           // 验证码已发送
+    object ResetPasswordSuccess : AuthState() // 密码重置成功
     data class Error(val message: String) : AuthState()
 }
 

@@ -135,6 +135,7 @@ fun NavigationMapScreenNew(
     var remainingDistance by remember { mutableStateOf(0) }       // 剩余总距离（米）
     var remainingDuration by remember { mutableStateOf(0) }       // 剩余总时间（秒）
     var simulationProgress by remember { mutableStateOf(0f) }     // 当前步骤进度 0-1
+    var isFollowingLocation by remember { mutableStateOf(true) }  // ⭐ 是否跟随定位（用户滑动地图后变为false）
 
     // 模式判断
     val isProfessional = viewModel?.isProfessionalMode() ?: false
@@ -227,6 +228,8 @@ fun NavigationMapScreenNew(
 
     // ==================== 权限变化后启动定位 ====================
     // 当权限被授予且地图已初始化时，启动定位
+    var hasMovedToLocation by remember { mutableStateOf(false) }  // ⭐ 只移动一次
+
     LaunchedEffect(hasLocationPermission, aMap) {
         if (hasLocationPermission && aMap != null && locationClient == null) {
             setupLocation(context, aMap!!) { client, location ->
@@ -234,8 +237,11 @@ fun NavigationMapScreenNew(
                 val newLocation = LatLng(location.latitude, location.longitude)
                 currentLocation = newLocation
 
-                // 首次定位成功后，移动地图到当前位置
-                aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
+                // ⭐ 只在第一次定位成功后移动地图，之后不再自动移动
+                if (!hasMovedToLocation) {
+                    aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
+                    hasMovedToLocation = true
+                }
             }
         }
     }
@@ -456,6 +462,7 @@ fun NavigationMapScreenNew(
                                         currentPosition = newLocation,
                                         steps = navigationSteps,
                                         map = mapObj,
+                                        isFollowing = isFollowingLocation,  // ⭐ 传入跟随状态
                                         onStateUpdate = { stepIndex, progress, remainDist, remainTime ->
                                             currentStepIndex = stepIndex
                                             simulationProgress = progress
@@ -473,6 +480,14 @@ fun NavigationMapScreenNew(
                         }
 
                         mapObj.setOnMapClickListener { showSearchResults = false }
+
+                        // ⭐ 监听地图触摸，用户手动滑动时关闭跟随模式
+                        mapObj.setOnMapTouchListener { event ->
+                            // 用户触摸移动地图时，关闭跟随模式
+                            if (event.action == android.view.MotionEvent.ACTION_MOVE) {
+                                isFollowingLocation = false
+                            }
+                        }
                     }
                 }
             },
@@ -1517,6 +1532,7 @@ fun NavigationMapScreenNew(
                                     navigationMode = NavigationMode.NAVIGATING
                                     isSearchExpanded = false
                                     showRouteInfo = false
+                                    isFollowingLocation = true  // ⭐ 开始导航时启用跟随模式
 
                                     // 切换到导航视角
                                     aMap?.animateCamera(
@@ -1589,12 +1605,14 @@ fun NavigationMapScreenNew(
                 simulationProgress = simulationProgress,
                 destinationName = selectedPoi?.title ?: directDestinationName ?: "目的地",
                 isProfessional = isProfessional,
+                isFollowing = isFollowingLocation,  // ⭐ 传入跟随状态
                 onExitNavigation = {
                     navigationMode = NavigationMode.IDLE
                     navigationSteps = emptyList()
                     currentStepIndex = 0
                     simulationProgress = 0f
                     isSearchExpanded = true
+                    isFollowingLocation = true  // ⭐ 退出时恢复跟随模式
                     // 恢复显示路线信息
                     if (routePaths.isNotEmpty()) {
                         showRouteInfo = true
@@ -1616,6 +1634,81 @@ fun NavigationMapScreenNew(
                 onResumeNavigation = {
                     if (navigationMode == NavigationMode.PAUSED) {
                         navigationMode = NavigationMode.NAVIGATING
+                        isFollowingLocation = true  // ⭐ 恢复导航时启用跟随模式
+                    }
+                },
+                onOverviewRoute = {
+                    // ⭐ 全览路线：将相机移动到显示整条路线
+                    isFollowingLocation = false  // 关闭跟随模式
+
+                    val boundsBuilder = LatLngBounds.Builder()
+                    var hasPoints = false
+
+                    // 方式1：使用routePaths获取完整路线点
+                    if (routePaths.isNotEmpty()) {
+                        val selectedPath = routePaths.getOrNull(selectedRouteIndex) ?: routePaths[0]
+                        selectedPath.steps.forEach { step ->
+                            step.polyline?.forEach { latLonPoint ->
+                                boundsBuilder.include(LatLng(latLonPoint.latitude, latLonPoint.longitude))
+                                hasPoints = true
+                            }
+                        }
+                    }
+
+                    // 方式2：如果routePaths为空，使用navigationSteps
+                    if (!hasPoints && navigationSteps.isNotEmpty()) {
+                        navigationSteps.forEach { step ->
+                            step.polylinePoints.forEach { point ->
+                                boundsBuilder.include(point)
+                                hasPoints = true
+                            }
+                        }
+                    }
+
+                    // 添加当前位置
+                    currentLocation?.let {
+                        boundsBuilder.include(it)
+                        hasPoints = true
+                    }
+
+                    // 添加目的地
+                    directDestinationLatLng?.let {
+                        boundsBuilder.include(it)
+                        hasPoints = true
+                    }
+                    selectedPoi?.let { poi ->
+                        boundsBuilder.include(LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude))
+                        hasPoints = true
+                    }
+
+                    if (hasPoints) {
+                        try {
+                            val bounds = boundsBuilder.build()
+                            aMap?.animateCamera(
+                                CameraUpdateFactory.newLatLngBounds(bounds, 150),  // 增加边距
+                                1000,  // 动画时长
+                                null
+                            )
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                },
+                onResumeFollowing = {
+                    // ⭐ 恢复跟随模式
+                    isFollowingLocation = true
+                    currentLocation?.let { loc ->
+                        aMap?.animateCamera(
+                            CameraUpdateFactory.newCameraPosition(
+                                CameraPosition.Builder()
+                                    .target(loc)
+                                    .zoom(18f)
+                                    .tilt(60f)
+                                    .build()
+                            ),
+                            500,
+                            null
+                        )
                     }
                 }
             )
@@ -1951,8 +2044,11 @@ private fun NavigationModeUI(
     simulationProgress: Float,
     destinationName: String,
     isProfessional: Boolean,
+    isFollowing: Boolean,  // ⭐ 是否跟随模式
     onExitNavigation: () -> Unit,
-    onResumeNavigation: () -> Unit
+    onResumeNavigation: () -> Unit,
+    onOverviewRoute: () -> Unit,
+    onResumeFollowing: () -> Unit  // ⭐ 恢复跟随
 ) {
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
 
@@ -2228,18 +2324,35 @@ private fun NavigationModeUI(
                             Text("退出", fontSize = 16.sp)
                         }
 
-                        // 全览路线按钮
-                        Button(
-                            onClick = { /* 可以添加全览路线功能 */ },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-                        ) {
-                            Icon(Icons.Default.Map, null, Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("全览", fontSize = 16.sp)
+                        // ⭐ 根据跟随状态显示不同按钮
+                        if (isFollowing) {
+                            // 全览路线按钮
+                            Button(
+                                onClick = onOverviewRoute,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                            ) {
+                                Icon(Icons.Default.Map, null, Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("全览", fontSize = 16.sp)
+                            }
+                        } else {
+                            // 回到当前位置按钮
+                            Button(
+                                onClick = onResumeFollowing,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                            ) {
+                                Icon(Icons.Default.MyLocation, null, Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("定位", fontSize = 16.sp)
+                            }
                         }
                     }
                 }
@@ -2301,6 +2414,7 @@ private fun updateNavigationState(
     currentPosition: LatLng,
     steps: List<NavigationStep>,
     map: AMap?,
+    isFollowing: Boolean,  // ⭐ 是否跟随定位
     onStateUpdate: (stepIndex: Int, progress: Float, remainingDistance: Int, remainingDuration: Int) -> Unit,
     onArrived: () -> Unit
 ) {
@@ -2342,33 +2456,35 @@ private fun updateNavigationState(
         remainingTime += steps[i].duration
     }
 
-    // 更新地图相机跟随当前位置
-    map?.let {
-        // 计算朝向（如果有下一个点）
-        val bearing = if (currentStep != null && currentStep.polylinePoints.size > 1) {
-            val pointIndex = (closestProgress * (currentStep.polylinePoints.size - 1)).toInt()
-            val nextIndex = (pointIndex + 1).coerceAtMost(currentStep.polylinePoints.size - 1)
-            if (pointIndex != nextIndex) {
-                calculateBearing(currentStep.polylinePoints[pointIndex], currentStep.polylinePoints[nextIndex])
+    // ⭐ 只有在跟随模式下才更新地图相机
+    if (isFollowing) {
+        map?.let {
+            // 计算朝向（如果有下一个点）
+            val bearing = if (currentStep != null && currentStep.polylinePoints.size > 1) {
+                val pointIndex = (closestProgress * (currentStep.polylinePoints.size - 1)).toInt()
+                val nextIndex = (pointIndex + 1).coerceAtMost(currentStep.polylinePoints.size - 1)
+                if (pointIndex != nextIndex) {
+                    calculateBearing(currentStep.polylinePoints[pointIndex], currentStep.polylinePoints[nextIndex])
+                } else {
+                    0f
+                }
             } else {
                 0f
             }
-        } else {
-            0f
-        }
 
-        it.animateCamera(
-            CameraUpdateFactory.newCameraPosition(
-                CameraPosition.Builder()
-                    .target(currentPosition)
-                    .zoom(18f)
-                    .bearing(bearing)
-                    .tilt(60f)
-                    .build()
-            ),
-            500,
-            null
-        )
+            it.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(currentPosition)
+                        .zoom(18f)
+                        .bearing(bearing)
+                        .tilt(60f)
+                        .build()
+                ),
+                500,
+                null
+            )
+        }
     }
 
     // 回调更新UI

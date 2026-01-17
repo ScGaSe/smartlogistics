@@ -42,6 +42,37 @@ data class UserInfo(
     @SerializedName("phone_number") val phoneNumber: String? = null
 )
 
+// 发送验证码请求
+data class SendCodeRequest(
+    @SerializedName("phone_number") val phoneNumber: String,
+    val purpose: String = "reset_password"  // reset_password 或 register
+)
+
+// 发送验证码响应
+data class SendCodeResponse(
+    val code: Int,
+    val message: String,
+    val data: SendCodeData? = null
+)
+
+data class SendCodeData(
+    @SerializedName("expires_in") val expiresIn: Int = 300
+)
+
+// 重置密码请求
+data class ResetPasswordRequest(
+    @SerializedName("phone_number") val phoneNumber: String,
+    val code: String,
+    @SerializedName("new_password") val newPassword: String
+)
+
+// 重置密码响应
+data class ResetPasswordResponse(
+    val code: Int,
+    val message: String,
+    val data: Any? = null
+)
+
 // ==================== 车辆相关 ====================
 
 data class Vehicle(
