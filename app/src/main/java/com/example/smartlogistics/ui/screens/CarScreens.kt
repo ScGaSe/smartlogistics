@@ -114,57 +114,10 @@ fun CarHomeScreen(
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val trips by viewModel?.trips?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
 
-    // ==================== 交通枢纽POI状态 ====================
-    var transportHubs by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
-    var isLoadingHubs by remember { mutableStateOf(true) }
-    var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
-    var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
-
     // 初始化定位并搜索交通枢纽
     LaunchedEffect(Unit) {
         viewModel?.fetchVehicles()
         viewModel?.fetchTrips()
-
-        // 初始化定位
-        try {
-            AMapLocationClient.updatePrivacyShow(context, true, true)
-            AMapLocationClient.updatePrivacyAgree(context, true)
-
-            val client = AMapLocationClient(context)
-            locationClient = client
-
-            client.setLocationOption(AMapLocationClientOption().apply {
-                locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                isOnceLocation = true
-                isNeedAddress = true
-            })
-
-            client.setLocationListener { location ->
-                if (location != null && location.errorCode == 0) {
-                    currentLocation = location
-                    // 搜索附近交通枢纽
-                    searchTransportHubs(context, location) { hubs ->
-                        transportHubs = hubs
-                        isLoadingHubs = false
-                    }
-                } else {
-                    isLoadingHubs = false
-                }
-            }
-
-            client.startLocation()
-        } catch (e: Exception) {
-            android.util.Log.e("CarHome", "定位初始化失败: ${e.message}")
-            isLoadingHubs = false
-        }
-    }
-
-    // 清理定位客户端
-    DisposableEffect(Unit) {
-        onDispose {
-            locationClient?.stopLocation()
-            locationClient?.onDestroy()
-        }
     }
 
     Column(
@@ -203,7 +156,7 @@ fun CarHomeScreen(
                 }
             }
 
-            // 快捷统计 (移除停车费用)
+            // 快捷统计
             item {
                 QuickStatsCard(
                     items = listOf(
@@ -226,7 +179,7 @@ fun CarHomeScreen(
                 )
             }
 
-            // 功能网格
+            // 功能网格（保持原样）
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     menuItems.chunked(2).forEach { rowItems ->
@@ -251,166 +204,8 @@ fun CarHomeScreen(
                     }
                 }
             }
-
-            // 机场/火车站/高铁站
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "机场/火车站/高铁站",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            }
-
-            item {
-                if (isLoadingHubs) {
-                    // 加载中状态
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = CarGreen,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "正在获取附近交通枢纽...",
-                            fontSize = 14.sp,
-                            color = TextSecondary
-                        )
-                    }
-                } else if (transportHubs.isEmpty()) {
-                    // 无数据状态
-                    Text(
-                        text = "暂未找到附近的机场/火车站",
-                        fontSize = 14.sp,
-                        color = TextSecondary
-                    )
-                } else {
-                    // 显示真实POI数据
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(transportHubs.take(5)) { poi ->
-                            val distance = currentLocation?.let { loc ->
-                                calculateDistance(
-                                    loc.latitude, loc.longitude,
-                                    poi.latLonPoint.latitude, poi.latLonPoint.longitude
-                                )
-                            } ?: ""
-
-                            TransportHubCard(
-                                name = poi.title ?: "未知",
-                                distance = distance,
-                                icon = getTransportIcon(poi.typeDes ?: poi.typeCode ?: ""),
-                                onClick = {
-                                    // 跳转到导航，传递目的地信息
-                                    val encodedName = URLEncoder.encode(poi.title ?: "", "UTF-8")
-                                    navController.navigate("navigation_map?destination=$encodedName")
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
-    }
-}
-
-// ==================== 搜索交通枢纽 ====================
-private fun searchTransportHubs(
-    context: Context,
-    location: AMapLocation,
-    onResult: (List<PoiItem>) -> Unit
-) {
-    val allResults = mutableListOf<PoiItem>()
-    var completedSearches = 0
-    val totalSearches = 3
-
-    val searchTypes = listOf(
-        "机场" to "150500",      // 机场
-        "火车站" to "150200",    // 火车站
-        "高铁站" to "150200"     // 高铁站（同火车站分类）
-    )
-
-    searchTypes.forEach { (keyword, typeCode) ->
-        val query = PoiSearch.Query(keyword, typeCode, "")
-        query.pageSize = 5
-        query.pageNum = 0
-
-        val search = PoiSearch(context, query)
-
-        // 设置搜索范围：50公里内
-        val searchBound = PoiSearch.SearchBound(
-            LatLonPoint(location.latitude, location.longitude),
-            50000  // 50公里
-        )
-        search.bound = searchBound
-
-        search.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
-            override fun onPoiSearched(result: PoiResult?, code: Int) {
-                if (code == AMapException.CODE_AMAP_SUCCESS && result != null) {
-                    result.pois?.let { pois ->
-                        synchronized(allResults) {
-                            allResults.addAll(pois)
-                        }
-                    }
-                }
-
-                synchronized(allResults) {
-                    completedSearches++
-                    if (completedSearches >= totalSearches) {
-                        // 去重并按距离排序
-                        val uniqueResults = allResults
-                            .distinctBy { it.poiId }
-                            .sortedBy { poi ->
-                                calculateDistanceMeters(
-                                    location.latitude, location.longitude,
-                                    poi.latLonPoint.latitude, poi.latLonPoint.longitude
-                                )
-                            }
-                        onResult(uniqueResults)
-                    }
-                }
-            }
-
-            override fun onPoiItemSearched(item: PoiItem?, code: Int) {}
-        })
-
-        search.searchPOIAsyn()
-    }
-}
-
-// ==================== 计算距离（返回格式化字符串） ====================
-private fun calculateDistance(lat1: Double, lng1: Double, lat2: Double, lng2: Double): String {
-    val meters = calculateDistanceMeters(lat1, lng1, lat2, lng2)
-    return when {
-        meters < 1000 -> "${meters.toInt()}m"
-        else -> String.format("%.1fkm", meters / 1000)
-    }
-}
-
-// ==================== 计算距离（返回米） ====================
-private fun calculateDistanceMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
-    val earthRadius = 6371000.0 // 地球半径，米
-    val dLat = Math.toRadians(lat2 - lat1)
-    val dLng = Math.toRadians(lng2 - lng1)
-    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-            Math.sin(dLng / 2) * Math.sin(dLng / 2)
-    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return earthRadius * c
-}
-
-// ==================== 根据POI类型返回图标 ====================
-private fun getTransportIcon(typeDesc: String): ImageVector {
-    return when {
-        typeDesc.contains("机场") || typeDesc.contains("航") -> Icons.Rounded.Flight
-        typeDesc.contains("火车") || typeDesc.contains("高铁") || typeDesc.contains("站") -> Icons.Rounded.Train
-        else -> Icons.Rounded.Place
     }
 }
 
