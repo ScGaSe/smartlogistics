@@ -43,6 +43,7 @@ import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.utils.HazmatRecognitionHelper
 import com.example.smartlogistics.utils.HazmatRecognitionResult
+import com.example.smartlogistics.utils.HazmatClass
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.viewmodel.MainViewModel
@@ -75,6 +76,17 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
         "motorcycle" -> "摩托车"
         "minibus" -> "小型客车"
         else -> vehicleType ?: "未知"
+    }
+}
+
+// ==================== 将后端车型映射到货车版前端选项 ====================
+// 货车版支持的选项: truck(卡车), van(小型货车)
+private fun mapVehicleTypeToTruckOption(vehicleType: String?): String {
+    return when (vehicleType?.lowercase()) {
+        "truck", "pickup" -> "truck"           // 卡车、皮卡 -> 卡车
+        "van", "minibus" -> "van"              // 面包车、小型客车 -> 小型货车
+        "bus" -> "truck"                       // 客车 -> 卡车（大型）
+        else -> "truck"                        // 默认选择卡车
     }
 }
 
@@ -277,9 +289,9 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                                     plateNumber = plate
                                     recognitionResult = "识别成功: $plate"
                                 }
-                                // 自动填充车型
+                                // 自动填充车型 - 映射到前端选项
                                 detectedVehicleType?.let { vt ->
-                                    vehicleType = vt
+                                    vehicleType = mapVehicleTypeToTruckOption(vt)
                                     if (plate != null) {
                                         recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
                                     }
@@ -349,9 +361,9 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                                     plateNumber = plate
                                     recognitionResult = "识别成功: $plate"
                                 }
-                                // 自动填充车型
+                                // 自动填充车型 - 映射到前端选项
                                 detectedVehicleType?.let { vt ->
-                                    vehicleType = vt
+                                    vehicleType = mapVehicleTypeToTruckOption(vt)
                                     if (plate != null) {
                                         recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
                                     }
@@ -2433,14 +2445,18 @@ private fun HistoryRecordCard(
 }
 
 // ==================== 货物报备页面 ====================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = null) {
     val context = LocalContext.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     // 表单状态
     var cargoType by remember { mutableStateOf("普通货物") }
     var isHazardous by remember { mutableStateOf(false) }
-    var hazardClass by remember { mutableStateOf("") }
+    // 危险品类别 - 使用HazmatClass对象
+    var selectedHazmatClass by remember { mutableStateOf<HazmatClass?>(null) }
+    var hazardClassExpanded by remember { mutableStateOf(false) }  // 下拉菜单展开状态
     var weight by remember { mutableStateOf("") }
     var destination by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -2493,7 +2509,12 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                     }
                     parsed.weight?.let { weight = it }
                     parsed.destination?.let { destination = it }
-                    parsed.hazardClass?.let { hazardClass = it }
+                    // 危险品类别 - 从名称匹配HazmatClass对象
+                    parsed.hazardClass?.let { hazardName ->
+                        selectedHazmatClass = HazmatRecognitionHelper.HAZMAT_CLASSES.values.find {
+                            it.name == hazardName || it.englishName == hazardName
+                        }
+                    }
                     parsed.description?.let { description = it }
 
                     // 显示解析结果提示
@@ -2566,7 +2587,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                         isHazardous = true,
                                         classIndex = hazmatClass?.code?.toIntOrNull() ?: -1
                                     )
-                                    hazmatClass?.let { hazardClass = it.name }
+                                    hazmatClass?.let { selectedHazmatClass = it }
                                 } else {
                                     hazmatRecognitionResult = HazmatRecognitionResult(
                                         hazmatClass = null,
@@ -2637,7 +2658,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                         isHazardous = true,
                                         classIndex = hazmatClass?.code?.toIntOrNull() ?: -1
                                     )
-                                    hazmatClass?.let { hazardClass = it.name }
+                                    hazmatClass?.let { selectedHazmatClass = it }
                                 } else {
                                     hazmatRecognitionResult = HazmatRecognitionResult(
                                         hazmatClass = null,
@@ -2793,7 +2814,18 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                     listOf("普通货物", "冷链货物", "危险品").forEach { type ->
                         FilterChip(
                             selected = cargoType == type,
-                            onClick = { cargoType = type; isHazardous = type == "危险品" },
+                            onClick = {
+                                // 先清除焦点（关闭软键盘）
+                                focusManager.clearFocus()
+                                // 更新货物类型
+                                cargoType = type
+                                isHazardous = type == "危险品"
+                                // 如果选择非危险品，清空危险品相关状态
+                                if (type != "危险品") {
+                                    selectedHazmatClass = null
+                                    hazmatRecognitionResult = null
+                                }
+                            },
                             label = { Text(type) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = if (type == "危险品") ErrorRed.copy(alpha = 0.2f) else TruckOrange.copy(alpha = 0.2f),
@@ -2970,13 +3002,107 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 手动输入（识别后可修改）
-                    StyledTextField(
-                        value = hazardClass,
-                        onValueChange = { hazardClass = it },
-                        label = "危化品类别（可手动修改）",
-                        leadingIcon = Icons.Rounded.Warning
+                    // 危险品类别下拉选择
+                    Text(
+                        text = "危化品类别",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = hazardClassExpanded,
+                        onExpandedChange = { hazardClassExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedHazmatClass?.let { "${it.icon} ${it.name}" } ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            placeholder = { Text("请选择危化品类别", color = TextTertiary) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Warning,
+                                    contentDescription = null,
+                                    tint = if (selectedHazmatClass != null) Color(selectedHazmatClass!!.colorInt) else TextSecondary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = hazardClassExpanded)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = ErrorRed,
+                                unfocusedBorderColor = BorderLight,
+                                focusedLabelColor = ErrorRed
+                            )
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = hazardClassExpanded,
+                            onDismissRequest = { hazardClassExpanded = false }
+                        ) {
+                            // 遍历所有危险品类别
+                            HazmatRecognitionHelper.HAZMAT_CLASSES.values.forEach { hazmatClass ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            // 危化品颜色标识
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .background(
+                                                        Color(hazmatClass.colorInt),
+                                                        RoundedCornerShape(6.dp)
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = hazmatClass.code,
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = "${hazmatClass.icon} ${hazmatClass.name}",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = TextPrimary
+                                                )
+                                                Text(
+                                                    text = hazmatClass.englishName,
+                                                    fontSize = 11.sp,
+                                                    color = TextTertiary
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedHazmatClass = hazmatClass
+                                        hazardClassExpanded = false
+                                        // 同步更新识别结果显示
+                                        hazmatRecognitionResult = HazmatRecognitionResult(
+                                            hazmatClass = hazmatClass,
+                                            confidence = 1.0f,
+                                            isHazardous = true,
+                                            classIndex = hazmatClass.code.toIntOrNull() ?: -1
+                                        )
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -3007,7 +3133,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                     destination,
                     cargoType,
                     isHazardous,
-                    hazardClass.ifBlank { null },
+                    selectedHazmatClass?.name,  // 发送危险品中文名称
                     weight.toDoubleOrNull(),
                     description.ifBlank { null }
                 )
@@ -3058,14 +3184,27 @@ private fun parseVoiceContent(text: String): ParsedCargoInfo {
     when {
         lowerText.contains("危险") || lowerText.contains("危化") || lowerText.contains("化学") -> {
             cargoType = "危险品"
-            // 尝试提取危化品类别
-            val hazardPatterns = listOf(
-                "易燃", "易爆", "腐蚀", "有毒", "放射",
-                "氧化", "压缩气体", "液化气体"
+            // 尝试提取危化品类别 - 匹配HazmatRecognitionHelper中的13类
+            val hazardPatterns = mapOf(
+                "有毒" to "有毒物",
+                "毒" to "有毒物",
+                "氧气" to "氧气",
+                "易燃" to "易燃气体/液体",
+                "易燃固" to "易燃固体",
+                "腐蚀" to "腐蚀性物质",
+                "非易燃" to "非易燃气体",
+                "过氧化" to "有机过氧化物",
+                "爆炸" to "爆炸物",
+                "放射" to "放射性物质",
+                "吸入" to "吸入危害物",
+                "自燃" to "自燃物质",
+                "感染" to "感染性物质",
+                "传染" to "感染性物质"
             )
-            hazardPatterns.forEach { pattern ->
-                if (lowerText.contains(pattern)) {
-                    hazardClass = pattern
+            hazardPatterns.forEach { (keyword, className) ->
+                if (lowerText.contains(keyword)) {
+                    hazardClass = className
+                    return@forEach
                 }
             }
         }

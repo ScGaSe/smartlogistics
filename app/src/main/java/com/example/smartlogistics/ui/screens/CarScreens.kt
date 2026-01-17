@@ -76,6 +76,19 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
     }
 }
 
+// ==================== 将后端车型映射到私家车版前端选项 ====================
+// 私家车版支持的选项: sedan(轿车), suv(SUV), bus(客车), minibus(小型客车)
+private fun mapVehicleTypeToCarOption(vehicleType: String?): String {
+    return when (vehicleType?.lowercase()) {
+        "sedan", "car" -> "sedan"              // 轿车 -> 轿车
+        "suv" -> "suv"                         // SUV -> SUV
+        "bus" -> "bus"                         // 客车 -> 客车
+        "minibus", "van" -> "minibus"          // 小型客车、面包车 -> 小型客车
+        "truck", "pickup" -> "bus"             // 货车、皮卡 -> 客车（大型）
+        else -> "sedan"                        // 默认选择轿车
+    }
+}
+
 // ==================== 行程OCR识别结果数据类 ====================
 data class TripOcrResult(
     val tripType: String,           // flight / train
@@ -456,9 +469,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                                     plateNumber = plate
                                     recognitionResult = "识别成功: $plate"
                                 }
-                                // 自动填充车型
+                                // 自动填充车型 - 映射到前端选项
                                 detectedVehicleType?.let { vt ->
-                                    vehicleType = vt
+                                    vehicleType = mapVehicleTypeToCarOption(vt)
                                     if (plate != null) {
                                         recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
                                     }
@@ -526,9 +539,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                                     plateNumber = plate
                                     recognitionResult = "识别成功: $plate"
                                 }
-                                // 自动填充车型
+                                // 自动填充车型 - 映射到前端选项
                                 detectedVehicleType?.let { vt ->
-                                    vehicleType = vt
+                                    vehicleType = mapVehicleTypeToCarOption(vt)
                                     if (plate != null) {
                                         recognitionResult = "识别成功: $plate (${mapVehicleTypeToCn(vt)})"
                                     }
