@@ -304,11 +304,38 @@ fun MainAppEntry(viewModel: MainViewModel) {
                 )
             }
             
-            // 位置共享页面
-            composable("location_share") {
+            // ==================== 位置共享模块 ====================
+            // 发起位置共享（分享自己的位置）
+            composable(
+                route = "location_share/share/{tripId}",
+                arguments = listOf(
+                    navArgument("tripId") {
+                        type = NavType.IntType
+                    }
+                )
+            ) { backStackEntry ->
+                val tripId = backStackEntry.arguments?.getInt("tripId")
                 LocationShareScreen(
                     navController = navController,
-                    viewModel = viewModel
+                    mode = "share",
+                    tripId = tripId
+                )
+            }
+            
+            // 查看位置共享（查看对方分享的位置）
+            composable(
+                route = "location_share/view/{shareId}",
+                arguments = listOf(
+                    navArgument("shareId") {
+                        type = NavType.StringType
+                    }
+                )
+            ) { backStackEntry ->
+                val shareId = backStackEntry.arguments?.getString("shareId")
+                LocationShareScreen(
+                    navController = navController,
+                    mode = "view",
+                    shareId = shareId
                 )
             }
 

@@ -623,6 +623,119 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
+    
+    // ==================== 位置共享 ====================
+    
+    /**
+     * 发起位置共享
+     * @param tripId 行程ID
+     * @param expiresInHours 有效时长（小时）
+     */
+    suspend fun createLocationShare(tripId: Int, expiresInHours: Int = 24): NetworkResult<LocationShareResponse> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            val shareId = java.util.UUID.randomUUID().toString().take(8)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+            return NetworkResult.Success(LocationShareResponse(
+                id = 1,
+                shareId = shareId,
+                tripId = tripId,
+                userId = 1,
+                isActive = true,
+                wsUrl = "/ws/share/$shareId",
+                createdAt = sdf.format(java.util.Date()),
+                expiredAt = sdf.format(java.util.Date(System.currentTimeMillis() + expiresInHours * 3600 * 1000L))
+            ))
+        }
+        
+        return try {
+            val response = api.createLocationShare(tripId, expiresInHours)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("发起位置共享失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+    
+    /**
+     * 获取位置共享详情（用于加入共享）
+     * @param shareId 分享码
+     */
+    suspend fun getLocationShareDetail(shareId: String): NetworkResult<LocationShareDetail> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+            return NetworkResult.Success(LocationShareDetail(
+                shareId = shareId,
+                tripId = 1,
+                isActive = true,
+                ownerName = "张三",
+                tripInfo = Trip(
+                    id = 1,
+                    tripType = "train",
+                    tripNumber = "G1234",
+                    tripDate = "2026-01-20",
+                    status = "准点"
+                ),
+                wsUrl = "/ws/share/$shareId",
+                expiredAt = sdf.format(java.util.Date(System.currentTimeMillis() + 24 * 3600 * 1000L))
+            ))
+        }
+        
+        return try {
+            val response = api.getLocationShareDetail(shareId)
+            if (response.isSuccessful && response.body() != null) {
+                NetworkResult.Success(response.body()!!)
+            } else {
+                NetworkResult.Error("获取共享信息失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+    
+    /**
+     * 停止位置共享
+     */
+    suspend fun stopLocationShare(shareId: String): NetworkResult<Boolean> {
+        // 本地Mock模式
+        if (USE_LOCAL_MOCK) {
+            return NetworkResult.Success(true)
+        }
+        
+        return try {
+            val response = api.stopLocationShare(shareId)
+            if (response.isSuccessful) {
+                NetworkResult.Success(true)
+            } else {
+                NetworkResult.Error("停止位置共享失败: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            NetworkResult.Exception(e)
+        }
+    }
+    
+    /**
+     * 获取WebSocket基础URL
+     */
+    fun getWebSocketBaseUrl(): String {
+        return if (USE_LOCAL_MOCK) {
+            "ws://10.0.2.2:8000"  // Android模拟器访问本机
+        } else {
+            // 从HTTP URL转换为WebSocket URL
+            "ws://10.0.2.2:8000"  // 实际部署时替换为后端地址
+        }
+    }
+    
+    /**
+     * 获取Token（用于WebSocket认证）
+     */
+    fun getToken(): String? {
+        return tokenManager.getToken()
+    }
 }
 
 // ==================== 网络结果封装 ====================

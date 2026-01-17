@@ -148,4 +148,34 @@ interface ApiService {
     suspend fun findParking(
         @Part file: MultipartBody.Part
     ): Response<ParkingFindResponse>
+
+    // ==================== 位置共享 ====================
+    
+    /**
+     * 发起位置共享
+     * POST /trips/{trip_id}/share?expires_in_hours=24
+     */
+    @POST("trips/{trip_id}/share")
+    suspend fun createLocationShare(
+        @Path("trip_id") tripId: Int,
+        @Query("expires_in_hours") expiresInHours: Int = 24
+    ): Response<LocationShareResponse>
+    
+    /**
+     * 获取位置共享详情（加入共享时使用）
+     * GET /share/{share_id}
+     */
+    @GET("share/{share_id}")
+    suspend fun getLocationShareDetail(
+        @Path("share_id") shareId: String
+    ): Response<LocationShareDetail>
+    
+    /**
+     * 停止位置共享
+     * DELETE /share/{share_id}
+     */
+    @DELETE("share/{share_id}")
+    suspend fun stopLocationShare(
+        @Path("share_id") shareId: String
+    ): Response<Unit>
 }

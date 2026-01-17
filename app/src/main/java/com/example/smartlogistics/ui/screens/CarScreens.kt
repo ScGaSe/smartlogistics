@@ -2720,6 +2720,12 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
     var recognitionResult by remember { mutableStateOf<TripOcrResult?>(null) }
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     
+    // ==================== 位置共享相关状态 ====================
+    var showJoinShareDialog by remember { mutableStateOf(false) }
+    var joinShareId by remember { mutableStateOf("") }
+    var isJoiningShare by remember { mutableStateOf(false) }
+    var shareError by remember { mutableStateOf<String?>(null) }
+    
     // 执行OCR识别
     fun performOcrRecognition(imageUri: Uri, currentTripType: String) {
         isRecognizing = true
@@ -2795,7 +2801,7 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
     }
     
     DetailScreenTemplate(navController = navController, title = "我的行程", backgroundColor = BackgroundPrimary) {
-        // ==================== 接人/送人模式 ====================
+        // ==================== 加入位置共享 ====================
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -2829,13 +2835,13 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "接人/送人模式",
+                                text = "加入位置共享",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
                             )
                             Text(
-                                text = "实时分享您的位置给亲友",
+                                text = "输入分享码查看对方实时位置",
                                 fontSize = 13.sp,
                                 color = TextSecondary
                             )
@@ -2846,14 +2852,14 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Button(
-                    onClick = { navController.navigate("location_share") },
+                    onClick = { showJoinShareDialog = true },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF667EEA))
                 ) {
-                    Icon(imageVector = Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Icon(imageVector = Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "开始共享位置", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(text = "输入分享码", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -2876,8 +2882,36 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
                             }
                             StatusBadge(text = trip.status ?: "准点", backgroundColor = Color.White, textColor = CarGreen)
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "日期: ${trip.tripDate}", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
+                        
+                        // 共享位置按钮
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                // 跳转到位置共享页面，传递tripId
+                                trip.id?.let { tripId ->
+                                    navController.navigate("location_share/share/$tripId")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ShareLocation,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "共享实时位置",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -3159,6 +3193,107 @@ fun MyTripsScreen(navController: NavController, viewModel: MainViewModel? = null
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { showImagePickerDialog = false }) { Text("取消", color = TextSecondary) } }
+        )
+    }
+    
+    // ==================== 加入位置共享对话框 ====================
+    if (showJoinShareDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showJoinShareDialog = false
+                joinShareId = ""
+                shareError = null
+            },
+            title = { 
+                Text(
+                    text = "加入位置共享", 
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp
+                ) 
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "输入对方分享给你的分享码，即可查看对方的实时位置",
+                        fontSize = 14.sp,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    OutlinedTextField(
+                        value = joinShareId,
+                        onValueChange = { 
+                            joinShareId = it.uppercase().take(8)
+                            shareError = null
+                        },
+                        label = { Text("分享码") },
+                        placeholder = { Text("如: A1B2C3D4") },
+                        singleLine = true,
+                        isError = shareError != null,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF667EEA),
+                            unfocusedBorderColor = DividerColor
+                        )
+                    )
+                    
+                    if (shareError != null) {
+                        Text(
+                            text = shareError!!,
+                            color = Color(0xFFE53935),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "💡 分享码由对方在「共享实时位置」时生成",
+                        fontSize = 12.sp,
+                        color = TextTertiary
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (joinShareId.isBlank()) {
+                            shareError = "请输入分享码"
+                        } else if (joinShareId.length < 6) {
+                            shareError = "分享码格式不正确"
+                        } else {
+                            showJoinShareDialog = false
+                            // 跳转到查看页面
+                            navController.navigate("location_share/view/$joinShareId")
+                            joinShareId = ""
+                        }
+                    },
+                    enabled = !isJoiningShare,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF667EEA))
+                ) {
+                    if (isJoiningShare) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text("加入")
+                }
+            },
+            dismissButton = { 
+                TextButton(onClick = { 
+                    showJoinShareDialog = false
+                    joinShareId = ""
+                    shareError = null
+                }) { 
+                    Text("取消", color = TextSecondary) 
+                } 
+            }
         )
     }
 }

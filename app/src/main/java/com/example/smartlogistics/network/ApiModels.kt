@@ -318,3 +318,47 @@ data class ParkingNavigation(
     val latitude: Double?,
     val longitude: Double?
 )
+
+// ==================== 位置共享相关 ====================
+
+/**
+ * 发起位置共享的响应
+ * POST /trips/{trip_id}/share
+ */
+data class LocationShareResponse(
+    val id: Int? = null,
+    @SerializedName("share_id") val shareId: String,
+    @SerializedName("trip_id") val tripId: Int? = null,
+    @SerializedName("user_id") val userId: Int? = null,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("ws_url") val wsUrl: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+    @SerializedName("expired_at") val expiredAt: String? = null
+)
+
+/**
+ * 位置共享详情（加入时获取）
+ * GET /share/{share_id}
+ */
+data class LocationShareDetail(
+    @SerializedName("share_id") val shareId: String,
+    @SerializedName("trip_id") val tripId: Int? = null,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("owner_name") val ownerName: String? = null,
+    @SerializedName("trip_info") val tripInfo: Trip? = null,
+    @SerializedName("ws_url") val wsUrl: String? = null,
+    @SerializedName("expired_at") val expiredAt: String? = null
+)
+
+/**
+ * WebSocket位置消息（发送/接收）
+ */
+data class LocationMessage(
+    val type: String = "location",
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Float? = null,
+    val speed: Float? = null,
+    val heading: Float? = null,
+    val timestamp: String? = null
+)
