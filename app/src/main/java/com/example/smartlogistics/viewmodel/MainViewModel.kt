@@ -14,72 +14,72 @@ import kotlinx.coroutines.launch
  * 管理全局状态和通用数据
  */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    
+
     private val repository = Repository(application.applicationContext)
-    
+
     // ==================== 认证状态 ====================
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
-    
+
     private val _isLoggedIn = MutableStateFlow(repository.isLoggedIn())
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
-    
+
     private val _userInfo = MutableStateFlow<UserInfo?>(null)
     val userInfo: StateFlow<UserInfo?> = _userInfo.asStateFlow()
-    
+
     // 保存用户选择的角色
     private val _userRole = MutableStateFlow("personal")
     val userRole: StateFlow<String> = _userRole.asStateFlow()
-    
+
     // ==================== 车辆状态 ====================
     private val _vehicles = MutableStateFlow<List<Vehicle>>(emptyList())
     val vehicles: StateFlow<List<Vehicle>> = _vehicles.asStateFlow()
-    
+
     private val _vehicleState = MutableStateFlow<VehicleState>(VehicleState.Idle)
     val vehicleState: StateFlow<VehicleState> = _vehicleState.asStateFlow()
-    
+
     // ==================== 报备状态 (专业模式) ====================
     private val _reports = MutableStateFlow<List<CargoReport>>(emptyList())
     val reports: StateFlow<List<CargoReport>> = _reports.asStateFlow()
-    
+
     private val _reportState = MutableStateFlow<ReportState>(ReportState.Idle)
     val reportState: StateFlow<ReportState> = _reportState.asStateFlow()
-    
+
     // ==================== 行程状态 (个人模式) ====================
     private val _trips = MutableStateFlow<List<Trip>>(emptyList())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
-    
+
     private val _tripState = MutableStateFlow<TripState>(TripState.Idle)
     val tripState: StateFlow<TripState> = _tripState.asStateFlow()
-    
+
     // ==================== 导航状态 ====================
     private val _routeResult = MutableStateFlow<RouteResult?>(null)
     val routeResult: StateFlow<RouteResult?> = _routeResult.asStateFlow()
-    
+
     private val _trafficData = MutableStateFlow<TrafficData?>(null)
     val trafficData: StateFlow<TrafficData?> = _trafficData.asStateFlow()
-    
+
     // ==================== AI助手状态 ====================
     private val _aiResponse = MutableStateFlow<AskResponse?>(null)
     val aiResponse: StateFlow<AskResponse?> = _aiResponse.asStateFlow()
-    
+
     private val _aiState = MutableStateFlow<AIState>(AIState.Idle)
     val aiState: StateFlow<AIState> = _aiState.asStateFlow()
-    
+
     // ==================== 拥堵预测状态 ====================
     private val _congestionData = MutableStateFlow<CongestionResponse?>(null)
     val congestionData: StateFlow<CongestionResponse?> = _congestionData.asStateFlow()
-    
+
     // ==================== 停车预测 ====================
     private val _parkingPredictions = MutableStateFlow<List<ParkingPrediction>>(emptyList())
     val parkingPredictions: StateFlow<List<ParkingPrediction>> = _parkingPredictions.asStateFlow()
-    
+
     // ==================== POI数据 ====================
     private val _pois = MutableStateFlow<List<POI>>(emptyList())
     val pois: StateFlow<List<POI>> = _pois.asStateFlow()
-    
+
     // ==================== 认证方法 ====================
-    
+
     fun register(phoneNumber: String, password: String, role: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
@@ -97,7 +97,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     /**
      * 登录方法 - 使用用户选择的角色
      */
@@ -105,7 +105,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             _userRole.value = role
-            
+
             when (val result = repository.login(username, password)) {
                 is NetworkResult.Success -> {
                     _isLoggedIn.value = true
@@ -123,8 +123,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun logout() {
+        // ⭐ 登出时断开用户通知WebSocket
+        NotificationService.getInstance().disconnect()
+
         repository.logout()
         _isLoggedIn.value = false
         _userInfo.value = null
@@ -134,7 +137,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _trips.value = emptyList()
         _authState.value = AuthState.Idle
     }
-    
+
     fun fetchCurrentUser() {
         viewModelScope.launch {
             when (val result = repository.getCurrentUser()) {
@@ -145,12 +148,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun isProfessionalMode(): Boolean = _userRole.value == "professional"
     fun getUserName(): String = repository.getUserName()
-    
+
     // ==================== 车辆方法 ====================
-    
+
     fun fetchVehicles() {
         viewModelScope.launch {
             _vehicleState.value = VehicleState.Loading
@@ -169,7 +172,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun bindVehicle(
         plateNumber: String,
         vehicleType: String,
@@ -194,7 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun unbindVehicle(vehicleId: String) {
         viewModelScope.launch {
             if (repository.unbindVehicle(vehicleId)) {
@@ -202,9 +205,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 报备方法 (专业模式) ====================
-    
+
     fun fetchReports(page: Int = 1) {
         viewModelScope.launch {
             _reportState.value = ReportState.Loading
@@ -223,7 +226,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun submitReport(
         vehicleId: String,
         destinationId: String,
@@ -252,9 +255,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 行程方法 (个人模式) ====================
-    
+
     fun fetchTrips() {
         viewModelScope.launch {
             _tripState.value = TripState.Loading
@@ -273,7 +276,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun createTrip(tripType: String, tripNumber: String, tripDate: String) {
         viewModelScope.launch {
             _tripState.value = TripState.Loading
@@ -292,9 +295,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 导航方法 ====================
-    
+
     fun getRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null) {
         viewModelScope.launch {
             when (val result = repository.getRoute(startPoiId, endPoiId, vehicleId)) {
@@ -305,7 +308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     fun fetchTrafficData() {
         viewModelScope.launch {
             when (val result = repository.getTrafficData()) {
@@ -316,9 +319,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== AI助手方法 ★★★ ====================
-    
+
     /**
      * AI智能问答
      * @param query 用户问题
@@ -328,7 +331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _aiState.value = AIState.Loading
             val userRole = role ?: if (isProfessionalMode()) "professional" else "personal"
-            
+
             when (val result = repository.askAI(query, userRole)) {
                 is NetworkResult.Success -> {
                     _aiResponse.value = result.data
@@ -344,9 +347,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 拥堵预测方法 ★★★ ====================
-    
+
     fun predictCongestion(roadId: String, hours: Int = 2) {
         viewModelScope.launch {
             when (val result = repository.predictCongestion(roadId, hours)) {
@@ -357,9 +360,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== POI方法 ====================
-    
+
     fun fetchPOIs(type: String? = null) {
         viewModelScope.launch {
             val mode = if (isProfessionalMode()) "pro" else "personal"
@@ -371,9 +374,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 停车预测方法 ====================
-    
+
     fun fetchParkingPrediction(arrivalTime: String) {
         viewModelScope.launch {
             when (val result = repository.getParkingPrediction(arrivalTime)) {
@@ -384,25 +387,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    
+
     // ==================== 重置状态 ====================
-    
+
     fun resetAuthState() {
         _authState.value = AuthState.Idle
     }
-    
+
     fun resetVehicleState() {
         _vehicleState.value = VehicleState.Idle
     }
-    
+
     fun resetReportState() {
         _reportState.value = ReportState.Idle
     }
-    
+
     fun resetTripState() {
         _tripState.value = TripState.Idle
     }
-    
+
     fun resetAIState() {
         _aiState.value = AIState.Idle
     }

@@ -31,6 +31,7 @@ import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.utils.BiometricHelper
 import com.example.smartlogistics.viewmodel.AuthState
 import com.example.smartlogistics.viewmodel.MainViewModel
+import com.example.smartlogistics.network.NotificationService
 
 // ==================== 扩展函数：获取FragmentActivity ====================
 fun Context.findActivity(): FragmentActivity? {
@@ -99,6 +100,12 @@ fun LoginScreen(
             is AuthState.LoginSuccess -> {
                 val targetHome = (authState as AuthState.LoginSuccess).targetHome
                 onLoginSuccess(targetHome)
+
+                // ⭐ 登录成功后连接用户通知WebSocket
+                val userInfo = viewModel?.userInfo?.value
+                val userId = userInfo?.id ?: userInfo?.userId ?: 1
+                NotificationService.getInstance().connect(userId)
+
                 navController.navigate(targetHome) {
                     popUpTo("login") { inclusive = true }
                 }

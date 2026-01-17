@@ -49,6 +49,7 @@ import com.amap.api.services.poisearch.PoiSearch
 import com.amap.api.services.route.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
+import com.example.smartlogistics.network.TrafficWebSocket
 
 // ==================== 导航步骤数据类 ====================
 data class NavigationStep(
@@ -79,15 +80,15 @@ fun NavigationMapScreenNew(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     // 地图相关
     var mapView by remember { mutableStateOf<TextureMapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
-    
+
     // 定位相关
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
-    
+
     // 搜索相关
     var searchQuery by remember { mutableStateOf(initialDestination) }
     var isSearching by remember { mutableStateOf(false) }
@@ -106,15 +107,15 @@ fun NavigationMapScreenNew(
     var selectedRouteIndex by remember { mutableStateOf(0) }
     var isLoadingRoute by remember { mutableStateOf(false) }
     var showRouteInfo by remember { mutableStateOf(false) }
-    
+
     // 地图覆盖物
     var currentMarkers by remember { mutableStateOf<List<Marker>>(emptyList()) }
     var currentPolylines by remember { mutableStateOf<List<Polyline>>(emptyList()) }
-    
+
     // UI状态
     var showTraffic by remember { mutableStateOf(true) }
     var isSearchExpanded by remember { mutableStateOf(true) }
-    
+
     // ==================== 动态POI图层状态 ====================
     var showPoiLayer by remember { mutableStateOf(false) }
     var poiMarkers by remember { mutableStateOf<List<Marker>>(emptyList()) }
@@ -122,7 +123,7 @@ fun NavigationMapScreenNew(
     var selectedPoiType by remember { mutableStateOf<String?>(null) }  // 当前选中的POI类型
     var selectedPoiDetail by remember { mutableStateOf<PoiItem?>(null) }  // 点击的POI详情
     var showPoiDetailCard by remember { mutableStateOf(false) }  // 是否显示POI详情卡片
-    
+
     // ==================== 模拟导航状态 ====================
     var navigationMode by remember { mutableStateOf(NavigationMode.IDLE) }
     var navigationSteps by remember { mutableStateOf<List<NavigationStep>>(emptyList()) }
@@ -130,10 +131,17 @@ fun NavigationMapScreenNew(
     var remainingDistance by remember { mutableStateOf(0) }       // 剩余总距离（米）
     var remainingDuration by remember { mutableStateOf(0) }       // 剩余总时间（秒）
     var simulationProgress by remember { mutableStateOf(0f) }     // 当前步骤进度 0-1
-    
+
     // 模式判断
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
+
+    // ==================== 道路实况 WebSocket 状态 ====================
+    val trafficWebSocket = remember { TrafficWebSocket.getInstance() }
+    val gateQueues by trafficWebSocket.gateQueues.collectAsState()
+    val trafficConnectionState by trafficWebSocket.connectionState.collectAsState()
+    val lastTrafficUpdate by trafficWebSocket.lastUpdateTime.collectAsState()
+    var showGatePanel by remember { mutableStateOf(false) }  // 是否显示闸口面板
 
     // 权限
     var hasLocationPermission by remember {
@@ -159,17 +167,25 @@ fun NavigationMapScreenNew(
             kotlinx.coroutines.delay(100)
         }
     }
-    
+
     // 生命周期管理
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView?.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView?.onPause()
+                Lifecycle.Event.ON_RESUME -> {
+                    mapView?.onResume()
+                    // 连接道路实况WebSocket
+                    trafficWebSocket.connect()
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    mapView?.onPause()
+                }
                 Lifecycle.Event.ON_DESTROY -> {
                     locationClient?.stopLocation()
                     locationClient?.onDestroy()
                     mapView?.onDestroy()
+                    // 断开道路实况WebSocket
+                    trafficWebSocket.disconnect()
                 }
                 else -> {}
             }
@@ -180,6 +196,7 @@ fun NavigationMapScreenNew(
             locationClient?.stopLocation()
             locationClient?.onDestroy()
             mapView?.onDestroy()
+            trafficWebSocket.disconnect()
         }
     }
 
@@ -376,7 +393,7 @@ fun NavigationMapScreenNew(
                 TextureMapView(ctx).apply {
                     mapView = this
                     onCreate(Bundle())
-                    
+
                     aMap = map.also { mapObj ->
                         mapObj.uiSettings.apply {
                             isZoomControlsEnabled = false
@@ -384,15 +401,15 @@ fun NavigationMapScreenNew(
                             isMyLocationButtonEnabled = false
                             isScaleControlsEnabled = true
                         }
-                        
+
                         mapObj.isTrafficEnabled = showTraffic
-                        
+
                         if (hasLocationPermission) {
                             setupLocation(ctx, mapObj) { client, location ->
                                 locationClient = client
                                 val newLocation = LatLng(location.latitude, location.longitude)
                                 currentLocation = newLocation
-                                
+
                                 // ===== 真实导航模式：根据GPS位置更新导航状态 =====
                                 if (navigationMode == NavigationMode.NAVIGATING && navigationSteps.isNotEmpty()) {
                                     updateNavigationState(
@@ -414,7 +431,7 @@ fun NavigationMapScreenNew(
                                 }
                             }
                         }
-                        
+
                         mapObj.setOnMapClickListener { showSearchResults = false }
                     }
                 }
@@ -483,7 +500,7 @@ fun NavigationMapScreenNew(
                         // 终点输入
                         OutlinedTextField(
                             value = searchQuery,
-                            onValueChange = { 
+                            onValueChange = {
                                 searchQuery = it
                                 if (selectedPoi != null) {
                                     selectedPoi = null
@@ -500,7 +517,7 @@ fun NavigationMapScreenNew(
                             },
                             trailingIcon = {
                                 if (searchQuery.isNotBlank()) {
-                                    IconButton(onClick = { 
+                                    IconButton(onClick = {
                                         searchQuery = ""
                                         searchResults = emptyList()
                                         showSearchResults = false
@@ -555,7 +572,7 @@ fun NavigationMapScreenNew(
                                 Text(if (isSearching) "搜索中..." else "搜索")
                             }
                         }
-                        
+
                         // 规划路线按钮
                         if (selectedPoi != null && currentLocation != null && !showRouteInfo) {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -572,12 +589,12 @@ fun NavigationMapScreenNew(
                                             routePaths = paths
                                             selectedRouteIndex = 0
                                             showRouteInfo = true
-                                            
+
                                             // 绘制所有路线（选中的高亮，其他灰色）
                                             aMap?.let { map ->
                                                 clearOverlays(currentMarkers, currentPolylines)
                                                 currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
-                                                
+
                                                 // 添加起终点标记
                                                 val startMarker = map.addMarker(
                                                     MarkerOptions()
@@ -592,11 +609,11 @@ fun NavigationMapScreenNew(
                                                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                                                 )
                                                 currentMarkers = listOf(startMarker, endMarker)
-                                                
+
                                                 // 缩放到显示整条路线
                                                 zoomToRoute(map, paths[0])
                                             }
-                                            
+
                                             // 显示找到的路线数量
                                             if (paths.size > 1) {
                                                 Toast.makeText(context, "找到 ${paths.size} 条路线", Toast.LENGTH_SHORT).show()
@@ -644,7 +661,7 @@ fun NavigationMapScreenNew(
                                             selectedPoi = poi
                                             searchQuery = poi.title
                                             showSearchResults = false
-                                            
+
                                             aMap?.let { map ->
                                                 clearOverlays(currentMarkers, currentPolylines)
                                                 val marker = map.addMarker(
@@ -732,10 +749,10 @@ fun NavigationMapScreenNew(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                
+
                 // POI图层按钮
                 Surface(
-                    onClick = { 
+                    onClick = {
                         showPoiLayer = !showPoiLayer
                         if (!showPoiLayer) {
                             poiMarkers.forEach { it.remove() }
@@ -792,13 +809,50 @@ fun NavigationMapScreenNew(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // ⭐ 闸口实况按钮（WebSocket实时数据）
+                Surface(
+                    onClick = { showGatePanel = !showGatePanel },
+                    modifier = Modifier.size(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White,
+                    shadowElevation = 4.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Traffic,
+                            contentDescription = "闸口实况",
+                            tint = if (showGatePanel) primaryColor else TextSecondary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        // 连接状态指示器
+                        if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTED) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(8.dp)
+                                    .background(Color(0xFF4CAF50), CircleShape)
+                            )
+                        } else if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTING ||
+                            trafficConnectionState == TrafficWebSocket.ConnectionState.RECONNECTING) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(8.dp)
+                                    .background(Color(0xFFFFC107), CircleShape)
+                            )
+                        }
+                    }
+                }
             }
         }
-        
+
         // ==================== POI类型选择器 ====================
         // 存储当前搜索到的POI列表
         var currentPoiList by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
-        
+
         AnimatedVisibility(
             visible = showPoiLayer && navigationMode == NavigationMode.IDLE && !showPoiDetailCard,
             enter = fadeIn() + slideInVertically(),
@@ -830,7 +884,7 @@ fun NavigationMapScreenNew(
                             "充电站" to Icons.Default.Star
                         )
                     }
-                    
+
                     poiTypes.forEach { (typeName, icon) ->
                         val isSelected = selectedPoiType == typeName
                         Row(
@@ -916,6 +970,178 @@ fun NavigationMapScreenNew(
             }
         }
 
+        // ==================== 闸口实况面板（WebSocket实时数据）====================
+        AnimatedVisibility(
+            visible = showGatePanel && navigationMode == NavigationMode.IDLE,
+            enter = fadeIn() + slideInHorizontally(initialOffsetX = { it }),
+            exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it }),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 80.dp, end = 70.dp)
+                .statusBarsPadding()
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.widthIn(min = 180.dp, max = 220.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    // 标题栏
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🚗 闸口实况",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        // 连接状态
+                        val statusText = when (trafficConnectionState) {
+                            TrafficWebSocket.ConnectionState.CONNECTED -> "实时"
+                            TrafficWebSocket.ConnectionState.CONNECTING -> "连接中..."
+                            TrafficWebSocket.ConnectionState.RECONNECTING -> "重连中..."
+                            TrafficWebSocket.ConnectionState.DISCONNECTED -> "离线"
+                        }
+                        val statusColor = when (trafficConnectionState) {
+                            TrafficWebSocket.ConnectionState.CONNECTED -> Color(0xFF4CAF50)
+                            TrafficWebSocket.ConnectionState.CONNECTING,
+                            TrafficWebSocket.ConnectionState.RECONNECTING -> Color(0xFFFFC107)
+                            TrafficWebSocket.ConnectionState.DISCONNECTED -> Color(0xFFE57373)
+                        }
+                        Text(
+                            text = statusText,
+                            fontSize = 11.sp,
+                            color = statusColor,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = DividerColor)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 闸口列表
+                    if (gateQueues.isEmpty()) {
+                        Text(
+                            text = if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTED)
+                                "暂无数据" else "等待连接...",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        // 按排队数量排序显示
+                        val sortedGates = gateQueues.entries.sortedBy { it.value }
+                        sortedGates.forEach { (gateId, queueCount) ->
+                            val gateStatus = trafficWebSocket.getGateStatus(queueCount)
+                            val statusColor = when (gateStatus) {
+                                TrafficWebSocket.GateStatus.SMOOTH -> Color(0xFF4CAF50)    // 绿色-畅通
+                                TrafficWebSocket.GateStatus.NORMAL -> Color(0xFF8BC34A)    // 浅绿-正常
+                                TrafficWebSocket.GateStatus.BUSY -> Color(0xFFFFC107)      // 黄色-繁忙
+                                TrafficWebSocket.GateStatus.CONGESTED -> Color(0xFFE57373) // 红色-拥堵
+                            }
+                            val statusText = when (gateStatus) {
+                                TrafficWebSocket.GateStatus.SMOOTH -> "畅通"
+                                TrafficWebSocket.GateStatus.NORMAL -> "正常"
+                                TrafficWebSocket.GateStatus.BUSY -> "繁忙"
+                                TrafficWebSocket.GateStatus.CONGESTED -> "拥堵"
+                            }
+                            val gateName = when (gateId) {
+                                "Gate_N1" -> "北1号闸口"
+                                "Gate_N2" -> "北2号闸口"
+                                "Gate_S1" -> "南1号闸口"
+                                "Gate_S2" -> "南2号闸口"
+                                "Gate_E1" -> "东1号闸口"
+                                "Gate_E2" -> "东2号闸口"
+                                "Gate_W1" -> "西1号闸口"
+                                "Gate_W2" -> "西2号闸口"
+                                else -> gateId
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = gateName,
+                                    fontSize = 13.sp,
+                                    color = TextPrimary
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // 排队数量
+                                    Text(
+                                        text = "${queueCount}辆",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    // 状态标签
+                                    Box(
+                                        modifier = Modifier
+                                            .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = statusText,
+                                            fontSize = 11.sp,
+                                            color = statusColor,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 推荐闸口
+                        val recommendedGate = trafficWebSocket.getRecommendedGate()
+                        if (recommendedGate != null && gateQueues.size > 1) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = DividerColor)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(primaryColor.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "推荐: ${recommendedGate.gateName}",
+                                    fontSize = 12.sp,
+                                    color = primaryColor,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    // 更新时间
+                    lastTrafficUpdate?.let { updateTime ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "更新: ${updateTime.substringAfter("T").substringBefore(".")}",
+                            fontSize = 10.sp,
+                            color = TextTertiary
+                        )
+                    }
+                }
+            }
+        }
+
         // ==================== POI详情卡片 ====================
         AnimatedVisibility(
             visible = showPoiDetailCard && selectedPoiDetail != null && navigationMode == NavigationMode.IDLE,
@@ -968,7 +1194,7 @@ fun NavigationMapScreenNew(
                                 Icon(Icons.Default.Close, "关闭", tint = TextSecondary)
                             }
                         }
-                        
+
                         // 距离信息
                         if (poi.distance > 0) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -993,25 +1219,25 @@ fun NavigationMapScreenNew(
                                 )
                             }
                         }
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         // 导航按钮
                         Button(
                             onClick = {
                                 // 关闭POI详情卡片
                                 showPoiDetailCard = false
                                 showPoiLayer = false
-                                
+
                                 // 清除POI标记
                                 poiMarkers.forEach { it.remove() }
                                 poiMarkers = emptyList()
                                 selectedPoiType = null
-                                
+
                                 // 设置目的地并规划路线
                                 selectedPoi = poi
                                 searchQuery = poi.title ?: ""
-                                
+
                                 currentLocation?.let { start ->
                                     isLoadingRoute = true
                                     searchDriveRoute(
@@ -1024,11 +1250,11 @@ fun NavigationMapScreenNew(
                                             routePaths = paths
                                             selectedRouteIndex = 0
                                             showRouteInfo = true
-                                            
+
                                             aMap?.let { map ->
                                                 clearOverlays(currentMarkers, currentPolylines)
                                                 currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
-                                                
+
                                                 val startMarker = map.addMarker(
                                                     MarkerOptions()
                                                         .position(start)
@@ -1042,7 +1268,7 @@ fun NavigationMapScreenNew(
                                                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                                                 )
                                                 currentMarkers = listOf(startMarker, endMarker)
-                                                
+
                                                 zoomToRoute(map, paths[0])
                                             }
                                         } else {
@@ -1050,7 +1276,7 @@ fun NavigationMapScreenNew(
                                         }
                                     }
                                 }
-                                
+
                                 selectedPoiDetail = null
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -1098,9 +1324,9 @@ fun NavigationMapScreenNew(
                                 Icon(Icons.Default.Close, "关闭", tint = TextSecondary)
                             }
                         }
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         // 多路线选择（可横向滚动）
                         if (routePaths.size > 1) {
                             Row(
@@ -1110,10 +1336,10 @@ fun NavigationMapScreenNew(
                                 routePaths.forEachIndexed { index, path ->
                                     val label = getRouteLabel(path, routePaths, index)
                                     val isSelected = index == selectedRouteIndex
-                                    
+
                                     FilterChip(
                                         selected = isSelected,
-                                        onClick = { 
+                                        onClick = {
                                             selectedRouteIndex = index
                                             aMap?.let { map ->
                                                 currentPolylines.forEach { it.remove() }
@@ -1121,7 +1347,7 @@ fun NavigationMapScreenNew(
                                                 zoomToRoute(map, routePaths[index])
                                             }
                                         },
-                                        label = { 
+                                        label = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
                                                 Spacer(modifier = Modifier.width(4.dp))
@@ -1151,7 +1377,7 @@ fun NavigationMapScreenNew(
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                         }
-                        
+
                         // 路线信息
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1168,15 +1394,15 @@ fun NavigationMapScreenNew(
                                 Text("过路费", fontSize = 12.sp, color = TextSecondary)
                             }
                         }
-                        
+
                         // 路线对比信息（当有多条路线时显示）
                         if (routePaths.size > 1) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            
+
                             val firstPath = routePaths[0]
                             val timeDiff = selectedPath.duration - firstPath.duration
                             val distDiff = selectedPath.distance - firstPath.distance
-                            
+
                             if (selectedRouteIndex != 0 && (timeDiff != 0L || distDiff != 0f)) {
                                 Row(
                                     modifier = Modifier
@@ -1200,7 +1426,7 @@ fun NavigationMapScreenNew(
                                 }
                             }
                         }
-                        
+
                         if (selectedPath.totalTrafficlights > 0) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -1209,9 +1435,9 @@ fun NavigationMapScreenNew(
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             )
                         }
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         Button(
                             onClick = {
                                 // 启动真实导航模式
@@ -1225,7 +1451,7 @@ fun NavigationMapScreenNew(
                                     navigationMode = NavigationMode.NAVIGATING
                                     isSearchExpanded = false
                                     showRouteInfo = false
-                                    
+
                                     // 切换到导航视角
                                     aMap?.animateCamera(
                                         CameraUpdateFactory.newCameraPosition(
@@ -1236,7 +1462,7 @@ fun NavigationMapScreenNew(
                                                 .build()
                                         )
                                     )
-                                    
+
                                     Toast.makeText(context, "开始导航，请沿路线行驶", Toast.LENGTH_SHORT).show()
                                 } else {
                                     Toast.makeText(context, "请等待定位完成", Toast.LENGTH_SHORT).show()
@@ -1254,7 +1480,7 @@ fun NavigationMapScreenNew(
                 }
             }
         }
-        
+
         // 底部路况图例（POI详情卡片显示时隐藏）
         if (!showRouteInfo && navigationMode == NavigationMode.IDLE && !showPoiDetailCard) {
             Card(
@@ -1278,7 +1504,7 @@ fun NavigationMapScreenNew(
                 }
             }
         }
-        
+
         // ==================== 模拟导航界面 ====================
         AnimatedVisibility(
             visible = navigationMode != NavigationMode.IDLE,
@@ -1367,11 +1593,11 @@ private fun setupLocation(context: Context, map: AMap, onResult: (AMapLocationCl
     }
     map.myLocationStyle = style
     map.isMyLocationEnabled = true
-    
+
     try {
         AMapLocationClient.updatePrivacyShow(context, true, true)
         AMapLocationClient.updatePrivacyAgree(context, true)
-        
+
         val client = AMapLocationClient(context)
         client.setLocationOption(AMapLocationClientOption().apply {
             locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
@@ -1379,7 +1605,7 @@ private fun setupLocation(context: Context, map: AMap, onResult: (AMapLocationCl
             isOnceLocation = false
             interval = 2000
         })
-        
+
         var isFirst = true
         client.setLocationListener { location ->
             if (location != null && location.errorCode == 0) {
@@ -1440,17 +1666,17 @@ data class RouteStrategy(
 private fun searchDriveRoute(context: Context, start: LatLonPoint, end: LatLonPoint, onResult: (List<DrivePath>) -> Unit) {
     val routeSearch = RouteSearch(context)
     val fromAndTo = RouteSearch.FromAndTo(start, end)
-    
+
     // 使用多策略模式，返回多条路线
     // 策略10：返回多条路线（包含最快、最短等）
     val query = RouteSearch.DriveRouteQuery(
-        fromAndTo, 
+        fromAndTo,
         10,  // 多路线策略
-        null, 
-        null, 
+        null,
+        null,
         ""
     )
-    
+
     routeSearch.setRouteSearchListener(object : RouteSearch.OnRouteSearchListener {
         override fun onDriveRouteSearched(result: DriveRouteResult?, code: Int) {
             if (code == AMapException.CODE_AMAP_SUCCESS && result?.paths != null) {
@@ -1476,12 +1702,12 @@ private fun searchDriveRoute(context: Context, start: LatLonPoint, end: LatLonPo
  */
 private fun getRouteLabel(path: DrivePath, allPaths: List<DrivePath>, index: Int): String {
     if (allPaths.size <= 1) return "推荐"
-    
+
     val minDuration = allPaths.minOfOrNull { it.duration } ?: 0
     val minDistance = allPaths.minOfOrNull { it.distance } ?: 0
     val minTolls = allPaths.minOfOrNull { it.tolls } ?: 0
     val minTrafficLights = allPaths.minOfOrNull { it.totalTrafficlights } ?: 0
-    
+
     return when {
         index == 0 -> "推荐"
         path.duration == minDuration && path.duration < allPaths[0].duration -> "时间短"
@@ -1500,13 +1726,13 @@ private fun getRouteLabel(path: DrivePath, allPaths: List<DrivePath>, index: Int
 private fun drawRoute(map: AMap, path: DrivePath, isProfessional: Boolean): List<Polyline> {
     val color = if (isProfessional) AndroidColor.parseColor("#FF6D00") else AndroidColor.parseColor("#4285F4")
     val points = mutableListOf<LatLng>()
-    
+
     path.steps.forEach { step ->
         step.polyline.forEach { point ->
             points.add(LatLng(point.latitude, point.longitude))
         }
     }
-    
+
     val polyline = map.addPolyline(
         PolylineOptions()
             .addAll(points)
@@ -1514,7 +1740,7 @@ private fun drawRoute(map: AMap, path: DrivePath, isProfessional: Boolean): List
             .color(color)
             .geodesic(true)
     )
-    
+
     return listOf(polyline)
 }
 
@@ -1522,15 +1748,15 @@ private fun drawRoute(map: AMap, path: DrivePath, isProfessional: Boolean): List
  * 绘制所有路线（选中的高亮，未选中的灰色半透明）
  */
 private fun drawAllRoutes(
-    map: AMap, 
-    paths: List<DrivePath>, 
-    selectedIndex: Int, 
+    map: AMap,
+    paths: List<DrivePath>,
+    selectedIndex: Int,
     isProfessional: Boolean
 ): List<Polyline> {
     val polylines = mutableListOf<Polyline>()
     val selectedColor = if (isProfessional) AndroidColor.parseColor("#FF6D00") else AndroidColor.parseColor("#4285F4")
     val unselectedColor = AndroidColor.parseColor("#80AAAAAA")  // 灰色半透明
-    
+
     // 先绘制未选中的路线（在下层）
     paths.forEachIndexed { index, path ->
         if (index != selectedIndex) {
@@ -1540,7 +1766,7 @@ private fun drawAllRoutes(
                     points.add(LatLng(point.latitude, point.longitude))
                 }
             }
-            
+
             val polyline = map.addPolyline(
                 PolylineOptions()
                     .addAll(points)
@@ -1552,7 +1778,7 @@ private fun drawAllRoutes(
             polylines.add(polyline)
         }
     }
-    
+
     // 再绘制选中的路线（在上层）
     val selectedPath = paths.getOrNull(selectedIndex)
     if (selectedPath != null) {
@@ -1562,7 +1788,7 @@ private fun drawAllRoutes(
                 points.add(LatLng(point.latitude, point.longitude))
             }
         }
-        
+
         val polyline = map.addPolyline(
             PolylineOptions()
                 .addAll(points)
@@ -1573,7 +1799,7 @@ private fun drawAllRoutes(
         )
         polylines.add(polyline)
     }
-    
+
     return polylines
 }
 
@@ -1584,7 +1810,7 @@ private fun zoomToRoute(map: AMap, path: DrivePath) {
             points.add(LatLng(point.latitude, point.longitude))
         }
     }
-    
+
     if (points.size >= 2) {
         val builder = LatLngBounds.Builder()
         points.forEach { builder.include(it) }
@@ -1614,7 +1840,7 @@ private fun NavigationModeUI(
     onResumeNavigation: () -> Unit
 ) {
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         // 顶部导航指引卡片
         Card(
@@ -1675,9 +1901,9 @@ private fun NavigationModeUI(
                                 modifier = Modifier.size(40.dp)
                             )
                         }
-                        
+
                         Spacer(modifier = Modifier.width(16.dp))
-                        
+
                         Column(modifier = Modifier.weight(1f)) {
                             // 距离下一步
                             Text(
@@ -1696,7 +1922,7 @@ private fun NavigationModeUI(
                             )
                         }
                     }
-                    
+
                     // 进度指示
                     Spacer(modifier = Modifier.height(12.dp))
                     LinearProgressIndicator(
@@ -1707,7 +1933,7 @@ private fun NavigationModeUI(
                         color = Color.White,
                         trackColor = Color.White.copy(alpha = 0.3f)
                     )
-                    
+
                     // 路名
                     if (currentStep.roadName.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1720,7 +1946,7 @@ private fun NavigationModeUI(
                 }
             }
         }
-        
+
         // 下一步预览（非到达状态）
         if (navigationMode != NavigationMode.ARRIVED && nextStep != null) {
             Card(
@@ -1763,7 +1989,7 @@ private fun NavigationModeUI(
                 }
             }
         }
-        
+
         // 底部信息栏
         Card(
             modifier = Modifier
@@ -1790,7 +2016,7 @@ private fun NavigationModeUI(
                         )
                         Text("预计剩余", fontSize = 12.sp, color = TextSecondary)
                     }
-                    
+
                     // 分隔线
                     Box(
                         modifier = Modifier
@@ -1798,7 +2024,7 @@ private fun NavigationModeUI(
                             .height(40.dp)
                             .background(DividerColor)
                     )
-                    
+
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = formatDistance(remainingDistance),
@@ -1808,7 +2034,7 @@ private fun NavigationModeUI(
                         )
                         Text("剩余距离", fontSize = 12.sp, color = TextSecondary)
                     }
-                    
+
                     // 分隔线
                     Box(
                         modifier = Modifier
@@ -1816,7 +2042,7 @@ private fun NavigationModeUI(
                             .height(40.dp)
                             .background(DividerColor)
                     )
-                    
+
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "${currentStepIndex + 1}/$totalSteps",
@@ -1827,9 +2053,9 @@ private fun NavigationModeUI(
                         Text("步骤", fontSize = 12.sp, color = TextSecondary)
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 目的地
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1851,9 +2077,9 @@ private fun NavigationModeUI(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 // 操作按钮
                 if (navigationMode == NavigationMode.ARRIVED) {
                     Button(
@@ -1886,7 +2112,7 @@ private fun NavigationModeUI(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("退出", fontSize = 16.sp)
                         }
-                        
+
                         // 全览路线按钮
                         Button(
                             onClick = { /* 可以添加全览路线功能 */ },
@@ -1928,7 +2154,7 @@ private fun getNavigationIcon(action: String): androidx.compose.ui.graphics.vect
 private fun parseNavigationSteps(path: DrivePath): List<NavigationStep> {
     return path.steps.map { step ->
         val points = step.polyline.map { LatLng(it.latitude, it.longitude) }
-        
+
         // 从指令中提取动作类型
         val instruction = step.instruction ?: ""
         val action = when {
@@ -1942,7 +2168,7 @@ private fun parseNavigationSteps(path: DrivePath): List<NavigationStep> {
             instruction.contains("环岛") -> "环岛"
             else -> "直行"
         }
-        
+
         NavigationStep(
             instruction = instruction.ifBlank { "继续前行" },
             distance = step.distance.toInt(),
@@ -1964,16 +2190,16 @@ private fun updateNavigationState(
     onArrived: () -> Unit
 ) {
     if (steps.isEmpty()) return
-    
+
     // 找到当前位置最接近的步骤和点
     var minDistance = Double.MAX_VALUE
     var closestStepIndex = 0
     var closestProgress = 0f
-    
+
     for ((stepIndex, step) in steps.withIndex()) {
         val points = step.polylinePoints
         if (points.isEmpty()) continue
-        
+
         for ((pointIndex, point) in points.withIndex()) {
             val distance = calculateDistance(currentPosition, point)
             if (distance < minDistance) {
@@ -1983,24 +2209,24 @@ private fun updateNavigationState(
             }
         }
     }
-    
+
     // 计算剩余距离和时间
     var remainingDist = 0
     var remainingTime = 0
-    
+
     // 当前步骤的剩余部分
     val currentStep = steps.getOrNull(closestStepIndex)
     if (currentStep != null) {
         remainingDist += ((1 - closestProgress) * currentStep.distance).toInt()
         remainingTime += ((1 - closestProgress) * currentStep.duration).toInt()
     }
-    
+
     // 后续步骤的距离和时间
     for (i in (closestStepIndex + 1) until steps.size) {
         remainingDist += steps[i].distance
         remainingTime += steps[i].duration
     }
-    
+
     // 更新地图相机跟随当前位置
     map?.let {
         // 计算朝向（如果有下一个点）
@@ -2015,7 +2241,7 @@ private fun updateNavigationState(
         } else {
             0f
         }
-        
+
         it.animateCamera(
             CameraUpdateFactory.newCameraPosition(
                 CameraPosition.Builder()
@@ -2029,10 +2255,10 @@ private fun updateNavigationState(
             null
         )
     }
-    
+
     // 回调更新UI
     onStateUpdate(closestStepIndex, closestProgress, remainingDist, remainingTime)
-    
+
     // 判断是否到达目的地（距离终点小于30米）
     val lastStep = steps.lastOrNull()
     val destination = lastStep?.polylinePoints?.lastOrNull()
@@ -2048,17 +2274,17 @@ private fun updateNavigationState(
 
 private fun calculateDistance(point1: LatLng, point2: LatLng): Double {
     val earthRadius = 6371000.0 // 地球半径（米）
-    
+
     val lat1 = Math.toRadians(point1.latitude)
     val lat2 = Math.toRadians(point2.latitude)
     val dLat = Math.toRadians(point2.latitude - point1.latitude)
     val dLng = Math.toRadians(point2.longitude - point1.longitude)
-    
+
     val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
             Math.cos(lat1) * Math.cos(lat2) *
             Math.sin(dLng / 2) * Math.sin(dLng / 2)
     val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    
+
     return earthRadius * c
 }
 
@@ -2069,15 +2295,15 @@ private fun calculateBearing(start: LatLng, end: LatLng): Float {
     val startLng = Math.toRadians(start.longitude)
     val endLat = Math.toRadians(end.latitude)
     val endLng = Math.toRadians(end.longitude)
-    
+
     val dLng = endLng - startLng
-    
+
     val x = Math.sin(dLng) * Math.cos(endLat)
     val y = Math.cos(startLat) * Math.sin(endLat) - Math.sin(startLat) * Math.cos(endLat) * Math.cos(dLng)
-    
+
     var bearing = Math.toDegrees(Math.atan2(x, y)).toFloat()
     if (bearing < 0) bearing += 360f
-    
+
     return bearing
 }
 
@@ -2109,21 +2335,21 @@ private fun searchNearbyPoi(
     onResult: (List<PoiItem>) -> Unit
 ) {
     val typeCode = getPoiTypeCode(poiType)
-    
+
     // 使用周边搜索
     val query = PoiSearch.Query(poiType, typeCode, "")
     query.pageSize = 20
     query.pageNum = 0
-    
+
     val search = PoiSearch(context, query)
-    
+
     // 设置搜索范围
     val searchBound = PoiSearch.SearchBound(
         LatLonPoint(location.latitude, location.longitude),
         radius
     )
     search.bound = searchBound
-    
+
     search.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
         override fun onPoiSearched(result: PoiResult?, code: Int) {
             if (code == AMapException.CODE_AMAP_SUCCESS) {
@@ -2135,10 +2361,10 @@ private fun searchNearbyPoi(
                 onResult(emptyList())
             }
         }
-        
+
         override fun onPoiItemSearched(item: PoiItem?, code: Int) {}
     })
-    
+
     search.searchPOIAsyn()
 }
 
@@ -2152,7 +2378,7 @@ private fun addPoiMarkers(
     isProfessional: Boolean
 ): List<Marker> {
     val markers = mutableListOf<Marker>()
-    
+
     // 根据POI类型选择标记颜色
     val hue = when (poiType) {
         "加油站" -> BitmapDescriptorFactory.HUE_YELLOW
@@ -2163,26 +2389,26 @@ private fun addPoiMarkers(
         "仓库" -> BitmapDescriptorFactory.HUE_CYAN
         else -> BitmapDescriptorFactory.HUE_RED
     }
-    
+
     pois.forEach { poi ->
         val position = LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude)
-        
+
         val markerOptions = MarkerOptions()
             .position(position)
             .title(poi.title)
             .snippet(buildPoiSnippet(poi, poiType))
             .icon(BitmapDescriptorFactory.defaultMarker(hue))
-        
+
         val marker = map.addMarker(markerOptions)
         markers.add(marker)
     }
-    
+
     // 显示信息窗口
     map.setOnMarkerClickListener { clickedMarker ->
         clickedMarker.showInfoWindow()
         true
     }
-    
+
     return markers
 }
 
@@ -2198,7 +2424,7 @@ private fun addPoiMarkersWithClick(
 ): List<Marker> {
     val markers = mutableListOf<Marker>()
     val poiMap = mutableMapOf<String, PoiItem>()  // 用于根据marker找到对应的POI
-    
+
     // 根据POI类型选择标记颜色
     val hue = when (poiType) {
         "加油站" -> BitmapDescriptorFactory.HUE_YELLOW
@@ -2209,23 +2435,23 @@ private fun addPoiMarkersWithClick(
         "仓库" -> BitmapDescriptorFactory.HUE_CYAN
         else -> BitmapDescriptorFactory.HUE_RED
     }
-    
+
     pois.forEach { poi ->
         val position = LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude)
         val markerId = "${poi.latLonPoint.latitude}_${poi.latLonPoint.longitude}"
-        
+
         val markerOptions = MarkerOptions()
             .position(position)
             .title(poi.title)
             .snippet(buildPoiSnippet(poi, poiType))
             .icon(BitmapDescriptorFactory.defaultMarker(hue))
-        
+
         val marker = map.addMarker(markerOptions)
         marker.setObject(poi)  // 将POI对象存储在marker中
         markers.add(marker)
         poiMap[markerId] = poi
     }
-    
+
     // 点击标记时显示详情卡片
     map.setOnMarkerClickListener { clickedMarker ->
         val poi = clickedMarker.`object` as? PoiItem
@@ -2236,7 +2462,7 @@ private fun addPoiMarkersWithClick(
         map.animateCamera(CameraUpdateFactory.newLatLngZoom(clickedMarker.position, 16f))
         true
     }
-    
+
     return markers
 }
 
@@ -2245,7 +2471,7 @@ private fun addPoiMarkersWithClick(
  */
 private fun buildPoiSnippet(poi: PoiItem, poiType: String): String {
     val parts = mutableListOf<String>()
-    
+
     // 地址
     if (!poi.snippet.isNullOrBlank()) {
         parts.add(poi.snippet)
@@ -2257,7 +2483,7 @@ private fun buildPoiSnippet(poi: PoiItem, poiType: String): String {
             parts.add(address)
         }
     }
-    
+
     // 距离
     if (poi.distance > 0) {
         val distanceText = if (poi.distance >= 1000) {
@@ -2267,6 +2493,6 @@ private fun buildPoiSnippet(poi: PoiItem, poiType: String): String {
         }
         parts.add("距离: $distanceText")
     }
-    
+
     return parts.joinToString(" | ")
 }

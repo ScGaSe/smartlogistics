@@ -30,6 +30,7 @@ import com.example.smartlogistics.ui.screens.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.amap.api.maps.MapsInitializer
+import com.example.smartlogistics.network.NotificationService
 
 class MainActivity : FragmentActivity() {
 
@@ -38,7 +39,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 初始化讯飞SDK（队友B添加）
+        // 初始化讯飞SDK
         initXunfeiSDK()
 
         // 初始化高德地图隐私合规
@@ -52,8 +53,11 @@ class MainActivity : FragmentActivity() {
         // 初始化网络客户端
         com.example.smartlogistics.network.RetrofitClient.init(
             context = applicationContext,
-            useMock = true // 开发阶段使用Mock
+            useMock = true
         )
+
+        // ⭐ 初始化通知服务
+        NotificationService.getInstance().initialize(this)
 
         setContent {
             SmartLogisticsTheme {
