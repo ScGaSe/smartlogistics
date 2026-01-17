@@ -73,6 +73,35 @@ enum class NavigationMode {
     PAUSED          // 暂停
 }
 
+// ==================== 位置缓存单例 ====================
+/**
+ * 缓存上次定位位置，避免每次进入导航页面都要等待重新定位
+ */
+object LocationCache {
+    var lastLocation: LatLng? = null
+        private set
+
+    var lastLocationTime: Long = 0
+        private set
+
+    fun updateLocation(lat: Double, lng: Double) {
+        lastLocation = LatLng(lat, lng)
+        lastLocationTime = System.currentTimeMillis()
+    }
+
+    /**
+     * 获取缓存的位置（5分钟内有效）
+     */
+    fun getCachedLocation(): LatLng? {
+        val cacheValidDuration = 5 * 60 * 1000L  // 5分钟
+        return if (System.currentTimeMillis() - lastLocationTime < cacheValidDuration) {
+            lastLocation
+        } else {
+            null
+        }
+    }
+}
+
 // ==================== 导航页面（合包SDK版） ====================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,9 +118,10 @@ fun NavigationMapScreenNew(
     var mapView by remember { mutableStateOf<TextureMapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
 
-    // 定位相关
-    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    // 定位相关 - 优先使用缓存位置
+    var currentLocation by remember { mutableStateOf(LocationCache.getCachedLocation()) }
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
+    var hasUsedCachedLocation by remember { mutableStateOf(false) }  // 是否已使用缓存位置移动地图
 
     // 搜索相关
     var searchQuery by remember { mutableStateOf(initialDestination) }
@@ -230,6 +260,19 @@ fun NavigationMapScreenNew(
     // 当权限被授予且地图已初始化时，启动定位
     var hasMovedToLocation by remember { mutableStateOf(false) }  // ⭐ 只移动一次
 
+    // ⭐ 地图加载后，如果有缓存位置，立即移动过去（不用等GPS定位）
+    LaunchedEffect(aMap) {
+        if (aMap != null && !hasUsedCachedLocation) {
+            val cachedLoc = LocationCache.getCachedLocation()
+            if (cachedLoc != null) {
+                aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(cachedLoc, 15f))
+                hasUsedCachedLocation = true
+                hasMovedToLocation = true  // 标记已移动，避免定位成功后重复移动
+                android.util.Log.d("NAV_LOCATION", "使用缓存位置: ${cachedLoc.latitude}, ${cachedLoc.longitude}")
+            }
+        }
+    }
+
     LaunchedEffect(hasLocationPermission, aMap) {
         if (hasLocationPermission && aMap != null && locationClient == null) {
             setupLocation(context, aMap!!) { client, location ->
@@ -237,7 +280,10 @@ fun NavigationMapScreenNew(
                 val newLocation = LatLng(location.latitude, location.longitude)
                 currentLocation = newLocation
 
-                // ⭐ 只在第一次定位成功后移动地图，之后不再自动移动
+                // ⭐ 更新位置缓存
+                LocationCache.updateLocation(location.latitude, location.longitude)
+
+                // ⭐ 只在没有缓存位置时移动地图（有缓存的话上面已经移动过了）
                 if (!hasMovedToLocation) {
                     aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
                     hasMovedToLocation = true
