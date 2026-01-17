@@ -12,10 +12,12 @@ data class RegisterRequest(
 )
 
 data class RegisterResponse(
-    val id: Int,
-    val username: String,
-    val role: String,
-    val message: String?
+    val id: Int? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    val username: String? = null,  // 兼容旧格式
+    val role: String? = null,
+    val nickname: String? = null,
+    val message: String? = null
 )
 
 // 注意：后端login使用username字段

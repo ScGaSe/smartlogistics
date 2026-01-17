@@ -43,9 +43,18 @@ class Repository(private val context: Context) {
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
-                NetworkResult.Error("注册失败: ${response.message()}")
+                // 解析错误响应
+                val errorBody = response.errorBody()?.string()
+                val errorMsg = try {
+                    val errorJson = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
+                    errorJson?.detail ?: errorJson?.message ?: "注册失败"
+                } catch (e: Exception) {
+                    errorBody ?: "注册失败: ${response.code()}"
+                }
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
+            e.printStackTrace()
             NetworkResult.Exception(e)
         }
     }
@@ -90,7 +99,15 @@ class Repository(private val context: Context) {
                 loginResponse.userInfo?.role?.let { tokenManager.saveUserRole(it) }
                 NetworkResult.Success(loginResponse)
             } else {
-                NetworkResult.Error("登录失败: ${response.code()} ${response.message()}")
+                // 解析错误响应
+                val errorBody = response.errorBody()?.string()
+                val errorMsg = try {
+                    val errorJson = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
+                    errorJson?.detail ?: errorJson?.message ?: "登录失败"
+                } catch (e: Exception) {
+                    errorBody ?: "登录失败: ${response.code()}"
+                }
+                NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -913,10 +930,10 @@ class Repository(private val context: Context) {
      */
     fun getWebSocketBaseUrl(): String {
         return if (USE_LOCAL_MOCK) {
-            "ws://10.0.2.2:8000"  // Android模拟器访问本机
+            "ws://192.168.31.4:8000"  // Android模拟器访问本机
         } else {
             // 从HTTP URL转换为WebSocket URL
-            "ws://10.0.2.2:8000"  // 实际部署时替换为后端地址
+            "ws://192.168.31.4:8000"  // 实际部署时替换为后端地址
         }
     }
 

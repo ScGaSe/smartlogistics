@@ -303,7 +303,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             // ==================== 位置共享模块 ====================
             // 发起位置共享（分享自己的位置）
             composable(
@@ -321,7 +321,7 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     tripId = tripId
                 )
             }
-            
+
             // 查看位置共享（查看对方分享的位置）
             composable(
                 route = "location_share/view/{shareId}",
@@ -403,43 +403,43 @@ fun MainAppEntry(viewModel: MainViewModel) {
                     viewModel = viewModel
                 )
             }
-            
+
             composable("account_security") {
                 AccountSecurityScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("notification_settings") {
                 NotificationSettingsScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("help_center") {
                 HelpCenterScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("about") {
                 AboutScreen(
                     navController = navController,
                     viewModel = viewModel
                 )
             }
-            
+
             composable("user_agreement") {
                 UserAgreementScreen(navController = navController)
             }
-            
+
             composable("privacy_policy") {
                 PrivacyPolicyScreen(navController = navController)
             }
-            
+
             composable("offline_map") {
                 OfflineMapScreen(
                     navController = navController,

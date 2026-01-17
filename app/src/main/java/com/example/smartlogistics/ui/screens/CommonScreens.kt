@@ -52,33 +52,33 @@ fun NavigationMapScreen(
     viewModel: MainViewModel? = null
 ) {
     val context = LocalContext.current
-    
+
     // 地图状态
     var showTraffic by remember { mutableStateOf(true) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     var destination by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(true) }
-    
+
     // ★ 新增：搜索相关状态
     var isSearching by remember { mutableStateOf(false) }
     var searchResults by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
     var showSearchResults by remember { mutableStateOf(false) }
     var selectedPoi by remember { mutableStateOf<PoiItem?>(null) }
-    
+
     // ★ 新增：路线相关状态
     var isLoadingRoute by remember { mutableStateOf(false) }
     var routePath by remember { mutableStateOf<DrivePath?>(null) }
     var showRouteInfo by remember { mutableStateOf(false) }
-    
+
     // ★ 新增：地图引用
     var aMapRef by remember { mutableStateOf<AMap?>(null) }
     var routePolyline by remember { mutableStateOf<Polyline?>(null) }
     var destinationMarker by remember { mutableStateOf<Marker?>(null) }
-    
+
     // 模式判断
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     // 权限请求
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -88,7 +88,7 @@ fun NavigationMapScreen(
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     }
-    
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -97,7 +97,7 @@ fun NavigationMapScreen(
             Toast.makeText(context, "需要定位权限才能显示当前位置", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     // 请求权限
     LaunchedEffect(Unit) {
         if (!hasLocationPermission) {
@@ -109,7 +109,7 @@ fun NavigationMapScreen(
             )
         }
     }
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ==================== 高德地图 ====================
         AMapView(
@@ -124,7 +124,7 @@ fun NavigationMapScreen(
                 currentLocation = LatLng(location.latitude, location.longitude)
             }
         )
-        
+
         // ==================== 顶部搜索栏 ====================
         AnimatedVisibility(
             visible = isSearchExpanded,
@@ -174,9 +174,9 @@ fun NavigationMapScreen(
                                 )
                             }
                         }
-                        
+
                         Spacer(modifier = Modifier.height(12.dp))
-                        
+
                         // 起点
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -201,7 +201,7 @@ fun NavigationMapScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        
+
                         // 连接线
                         Box(
                             modifier = Modifier
@@ -210,11 +210,11 @@ fun NavigationMapScreen(
                                 .height(20.dp)
                                 .background(BorderLight)
                         )
-                        
+
                         // 终点输入
                         OutlinedTextField(
                             value = destination,
-                            onValueChange = { 
+                            onValueChange = {
                                 destination = it
                                 // 清除之前的选择
                                 if (selectedPoi != null) {
@@ -235,7 +235,7 @@ fun NavigationMapScreen(
                             },
                             trailingIcon = {
                                 if (destination.isNotBlank()) {
-                                    IconButton(onClick = { 
+                                    IconButton(onClick = {
                                         destination = ""
                                         searchResults = emptyList()
                                         showSearchResults = false
@@ -263,7 +263,7 @@ fun NavigationMapScreen(
                             ),
                             singleLine = true
                         )
-                        
+
                         // ★ 搜索按钮 - 真正的POI搜索
                         if (destination.isNotBlank() && selectedPoi == null) {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -289,9 +289,9 @@ fun NavigationMapScreen(
                                         android.util.Log.e("SHA1_DEBUG", "获取SHA1失败: ${e.message}")
                                     }
                                     // ★★★ 调试代码结束 ★★★
-                                    
+
                                     isSearching = true
-                                    
+
                                     // ★★★ 简化版POI搜索 - 只用关键字搜索，不设置额外参数 ★★★
                                     // 参数1: 关键字
                                     // 参数2: POI类型（空=全部类型）
@@ -300,14 +300,14 @@ fun NavigationMapScreen(
                                     query.pageSize = 20
                                     query.pageNum = 0
                                     query.cityLimit = false  // 不限制城市
-                                    
+
                                     val poiSearch = PoiSearch(context, query)
-                                    
+
                                     poiSearch.setOnPoiSearchListener(object : PoiSearch.OnPoiSearchListener {
                                         override fun onPoiSearched(result: PoiResult?, code: Int) {
                                             isSearching = false
                                             android.util.Log.d("POISearch", "搜索结果: code=$code, 结果数=${result?.pois?.size ?: 0}")
-                                            
+
                                             when (code) {
                                                 AMapException.CODE_AMAP_SUCCESS -> {
                                                     if (result?.pois != null && result.pois.isNotEmpty()) {
@@ -356,43 +356,43 @@ fun NavigationMapScreen(
                                 Text(if (isSearching) "搜索中..." else "搜索")
                             }
                         }
-                        
+
                         // ★ 规划路线按钮
                         if (selectedPoi != null && currentLocation != null && !showRouteInfo) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
                                     isLoadingRoute = true
-                                    
+
                                     val routeSearch = RouteSearch(context)
                                     val fromPoint = LatLonPoint(currentLocation!!.latitude, currentLocation!!.longitude)
                                     val toPoint = selectedPoi!!.latLonPoint
                                     val fromAndTo = RouteSearch.FromAndTo(fromPoint, toPoint)
                                     val query = RouteSearch.DriveRouteQuery(fromAndTo, RouteSearch.DRIVING_SINGLE_DEFAULT, null, null, "")
-                                    
+
                                     routeSearch.setRouteSearchListener(object : RouteSearch.OnRouteSearchListener {
                                         override fun onDriveRouteSearched(result: DriveRouteResult?, code: Int) {
                                             isLoadingRoute = false
                                             if (code == AMapException.CODE_AMAP_SUCCESS && result?.paths != null && result.paths.isNotEmpty()) {
                                                 routePath = result.paths[0]
                                                 showRouteInfo = true
-                                                
+
                                                 // 在地图上绘制路线
                                                 aMapRef?.let { map ->
                                                     routePolyline?.remove()
-                                                    
+
                                                     val points = mutableListOf<LatLng>()
                                                     result.paths[0].steps.forEach { step ->
                                                         step.polyline.forEach { point ->
                                                             points.add(LatLng(point.latitude, point.longitude))
                                                         }
                                                     }
-                                                    
-                                                    val routeColor = if (isProfessional) 
-                                                        AndroidColor.parseColor("#FF6D00") 
-                                                    else 
+
+                                                    val routeColor = if (isProfessional)
+                                                        AndroidColor.parseColor("#FF6D00")
+                                                    else
                                                         AndroidColor.parseColor("#4285F4")
-                                                    
+
                                                     routePolyline = map.addPolyline(
                                                         PolylineOptions()
                                                             .addAll(points)
@@ -400,7 +400,7 @@ fun NavigationMapScreen(
                                                             .color(routeColor)
                                                             .geodesic(true)
                                                     )
-                                                    
+
                                                     if (points.size >= 2) {
                                                         val builder = LatLngBounds.Builder()
                                                         points.forEach { builder.include(it) }
@@ -441,7 +441,7 @@ fun NavigationMapScreen(
                         }
                     }
                 }
-                
+
                 // ★ 搜索结果列表
                 AnimatedVisibility(
                     visible = showSearchResults && searchResults.isNotEmpty(),
@@ -466,7 +466,7 @@ fun NavigationMapScreen(
                                             selectedPoi = poi
                                             destination = poi.title
                                             showSearchResults = false
-                                            
+
                                             aMapRef?.let { map ->
                                                 destinationMarker?.remove()
                                                 destinationMarker = map.addMarker(
@@ -527,7 +527,7 @@ fun NavigationMapScreen(
                 }
             }
         }
-        
+
         // 展开搜索栏按钮 (当收起时显示)
         if (!isSearchExpanded) {
             FloatingActionButton(
@@ -542,7 +542,7 @@ fun NavigationMapScreen(
                 Icon(Icons.Default.Search, contentDescription = "搜索")
             }
         }
-        
+
         // ==================== 右侧控制按钮 ====================
         Column(
             modifier = Modifier
@@ -558,9 +558,9 @@ fun NavigationMapScreen(
             ) {
                 Icon(Icons.Rounded.Traffic, contentDescription = "路况")
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             // 图层切换
             FloatingActionButton(
                 onClick = { /* 切换地图图层 */ },
@@ -570,9 +570,9 @@ fun NavigationMapScreen(
             ) {
                 Icon(Icons.Rounded.Layers, contentDescription = "图层")
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 定位按钮
             FloatingActionButton(
                 onClick = {
@@ -601,7 +601,7 @@ fun NavigationMapScreen(
                 )
             }
         }
-        
+
         // ==================== 底部路线信息卡 ★ ====================
         AnimatedVisibility(
             visible = showRouteInfo && routePath != null,
@@ -642,9 +642,9 @@ fun NavigationMapScreen(
                                 Icon(Icons.Default.Close, "关闭", tint = TextSecondary)
                             }
                         }
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         // 路线信息
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -683,7 +683,7 @@ fun NavigationMapScreen(
                                 Text("过路费", fontSize = 12.sp, color = TextSecondary)
                             }
                         }
-                        
+
                         if (path.totalTrafficlights > 0) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -693,9 +693,9 @@ fun NavigationMapScreen(
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             )
                         }
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         Button(
                             onClick = { Toast.makeText(context, "开始导航", Toast.LENGTH_SHORT).show() },
                             modifier = Modifier
@@ -712,7 +712,7 @@ fun NavigationMapScreen(
                 }
             }
         }
-        
+
         // ==================== 底部路况信息（没有路线时显示） ====================
         if (!showRouteInfo) {
             Card(
@@ -743,9 +743,9 @@ fun NavigationMapScreen(
                             color = if (showTraffic) primaryColor else TextTertiary
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     // 路况图例
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -756,9 +756,9 @@ fun NavigationMapScreen(
                         TrafficLegendItem(color = CongestionModerate, label = "拥堵")
                         TrafficLegendItem(color = CongestionSevere, label = "严重")
                     }
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     // 快捷操作
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -862,23 +862,24 @@ fun AiResultScreen(
 ) {
     val aiState by viewModel?.aiState?.collectAsState() ?: remember { mutableStateOf(AIState.Idle) }
     val aiResponse by viewModel?.aiResponse?.collectAsState() ?: remember { mutableStateOf(null) }
-    
+
     var userInput by remember { mutableStateOf("") }
     var chatHistory by remember { mutableStateOf(listOf<Pair<Boolean, String>>()) } // true = user, false = AI
-    
+
     LaunchedEffect(query) {
         if (query.isNotBlank()) {
             chatHistory = chatHistory + (true to query)
             viewModel?.askAI(query)
         }
     }
-    
+
     LaunchedEffect(aiResponse) {
         aiResponse?.let {
-            chatHistory = chatHistory + (false to it.answer)
+            val answerText = it.answer ?: it.data?.answer ?: "抱歉，无法获取回答"
+            chatHistory = chatHistory + (false to answerText)
         }
     }
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -905,9 +906,9 @@ fun AiResultScreen(
                             tint = TextPrimary
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.width(8.dp))
-                    
+
                     // AI头像
                     Box(
                         modifier = Modifier
@@ -922,9 +923,9 @@ fun AiResultScreen(
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.width(12.dp))
-                    
+
                     Column {
                         Text(
                             text = "AI智能助手",
@@ -940,7 +941,7 @@ fun AiResultScreen(
                     }
                 }
             }
-            
+
             // 聊天内容区域
             Column(
                 modifier = Modifier
@@ -953,7 +954,7 @@ fun AiResultScreen(
                 if (chatHistory.isEmpty()) {
                     AiWelcomeCard()
                 }
-                
+
                 // 聊天历史
                 chatHistory.forEach { (isUser, message) ->
                     if (isUser) {
@@ -962,16 +963,16 @@ fun AiResultScreen(
                         AiMessageBubble(message = message)
                     }
                 }
-                
+
                 // 加载状态
                 if (aiState is AIState.Loading) {
                     AiTypingIndicator()
                 }
-                
+
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
-        
+
         // 底部输入区域
         Surface(
             modifier = Modifier
@@ -999,9 +1000,9 @@ fun AiResultScreen(
                     ),
                     singleLine = true
                 )
-                
+
                 Spacer(modifier = Modifier.width(12.dp))
-                
+
                 FloatingActionButton(
                     onClick = {
                         if (userInput.isNotBlank()) {
@@ -1049,16 +1050,16 @@ private fun AiWelcomeCard() {
                     modifier = Modifier.size(36.dp)
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             Text(
                 text = "您好，我是AI智能助手",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
-            
+
             Text(
                 text = "我可以帮您规划路线、查询路况、推荐停车场等",
                 fontSize = 14.sp,
@@ -1066,18 +1067,18 @@ private fun AiWelcomeCard() {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 8.dp)
             )
-            
+
             Spacer(modifier = Modifier.height(20.dp))
-            
+
             // 快捷问题
             Text(
                 text = "您可以这样问我：",
                 fontSize = 13.sp,
                 color = TextTertiary
             )
-            
+
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             listOf(
                 "附近有什么好吃的?",
                 "去机场走哪条路最快?",
@@ -1160,9 +1161,9 @@ private fun AiMessageBubble(message: String) {
                 modifier = Modifier.size(18.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.width(8.dp))
-        
+
         Card(
             modifier = Modifier.widthIn(max = 280.dp),
             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
@@ -1199,9 +1200,9 @@ private fun AiTypingIndicator() {
                 modifier = Modifier.size(18.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.width(8.dp))
-        
+
         Card(
             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
@@ -1231,7 +1232,7 @@ fun UserProfileScreen(
     val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1255,7 +1256,7 @@ fun UserProfileScreen(
                     .offset(x = (-30).dp, y = (-30).dp)
                     .background(Color.White.copy(alpha = 0.1f), CircleShape)
             )
-            
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1285,24 +1286,24 @@ fun UserProfileScreen(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
+
                 Text(
                     text = userInfo?.userName ?: viewModel?.getUserName() ?: "用户",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                
+
                 Spacer(modifier = Modifier.height(4.dp))
-                
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (isProfessional) Icons.Rounded.LocalShipping 
-                                     else Icons.Rounded.DirectionsCar,
+                        imageVector = if (isProfessional) Icons.Rounded.LocalShipping
+                        else Icons.Rounded.DirectionsCar,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.8f),
                         modifier = Modifier.size(16.dp)
@@ -1316,7 +1317,7 @@ fun UserProfileScreen(
                 }
             }
         }
-        
+
         // 功能列表
         Column(
             modifier = Modifier
@@ -1332,30 +1333,30 @@ fun UserProfileScreen(
                 color = TextSecondary,
                 modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Person,
                 title = "个人资料",
                 subtitle = "修改头像、昵称",
                 onClick = { navController.navigate("edit_profile") }
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Security,
                 title = "账号安全",
                 subtitle = "密码、手机号",
                 onClick = { navController.navigate("account_security") }
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Notifications,
                 title = "消息通知",
                 subtitle = "推送设置",
                 onClick = { navController.navigate("notification_settings") }
             )
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             // 其他设置组
             Text(
                 text = "其他",
@@ -1363,28 +1364,28 @@ fun UserProfileScreen(
                 color = TextSecondary,
                 modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Help,
                 title = "帮助中心",
                 subtitle = "常见问题、使用指南",
                 onClick = { navController.navigate("help_center") }
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Info,
                 title = "关于我们",
                 subtitle = "版本 1.0.0",
                 onClick = { navController.navigate("about") }
             )
-            
+
             ProfileMenuItem(
                 icon = Icons.Rounded.Settings,
                 title = "系统设置",
                 subtitle = "通用设置",
                 onClick = { navController.navigate("settings") }
             )
-            
+
             Spacer(modifier = Modifier.height(80.dp))
         }
     }
@@ -1456,16 +1457,16 @@ fun SettingsScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     var darkMode by remember { mutableStateOf(false) }
     var autoUpdate by remember { mutableStateOf(true) }
     var locationService by remember { mutableStateOf(true) }
-    
+
     // 缓存大小状态
     var cacheSize by remember { mutableStateOf("128MB") }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showSwitchAccountDialog by remember { mutableStateOf(false) }
-    
+
     DetailScreenTemplate(
         navController = navController,
         title = "系统设置",
@@ -1478,21 +1479,21 @@ fun SettingsScreen(
             color = TextSecondary,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
-        
+
         SettingsCard {
             SettingsToggleItem(
                 icon = Icons.Rounded.DarkMode,
                 title = "深色模式",
                 subtitle = "夜间使用更护眼",
                 checked = darkMode,
-                onCheckedChange = { 
+                onCheckedChange = {
                     darkMode = it
                     Toast.makeText(context, if (it) "深色模式已开启" else "深色模式已关闭", Toast.LENGTH_SHORT).show()
                 }
             )
-            
+
             HorizontalDivider(color = DividerColor)
-            
+
             SettingsToggleItem(
                 icon = Icons.Rounded.Update,
                 title = "自动更新",
@@ -1500,15 +1501,15 @@ fun SettingsScreen(
                 checked = autoUpdate,
                 onCheckedChange = { autoUpdate = it }
             )
-            
+
             HorizontalDivider(color = DividerColor)
-            
+
             SettingsToggleItem(
                 icon = Icons.Rounded.LocationOn,
                 title = "位置服务",
                 subtitle = "允许获取位置信息",
                 checked = locationService,
-                onCheckedChange = { 
+                onCheckedChange = {
                     locationService = it
                     if (!it) {
                         Toast.makeText(context, "关闭位置服务将影响导航功能", Toast.LENGTH_SHORT).show()
@@ -1516,9 +1517,9 @@ fun SettingsScreen(
                 }
             )
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // 数据管理
         Text(
             text = "数据管理",
@@ -1526,7 +1527,7 @@ fun SettingsScreen(
             color = TextSecondary,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
-        
+
         SettingsCard {
             SettingsClickItem(
                 icon = Icons.Rounded.Cached,
@@ -1534,9 +1535,9 @@ fun SettingsScreen(
                 subtitle = "当前缓存 $cacheSize",
                 onClick = { showClearCacheDialog = true }
             )
-            
+
             HorizontalDivider(color = DividerColor)
-            
+
             SettingsClickItem(
                 icon = Icons.Rounded.Download,
                 title = "离线地图",
@@ -1544,9 +1545,9 @@ fun SettingsScreen(
                 onClick = { navController.navigate("offline_map") }
             )
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
+
         // 账户操作
         Text(
             text = "账户操作",
@@ -1554,7 +1555,7 @@ fun SettingsScreen(
             color = TextSecondary,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
-        
+
         SettingsCard {
             SettingsClickItem(
                 icon = Icons.Rounded.SwapHoriz,
@@ -1563,9 +1564,9 @@ fun SettingsScreen(
                 onClick = { showSwitchAccountDialog = true }
             )
         }
-        
+
         Spacer(modifier = Modifier.height(32.dp))
-        
+
         // 退出登录按钮
         Button(
             onClick = {
@@ -1595,9 +1596,9 @@ fun SettingsScreen(
                 fontWeight = FontWeight.SemiBold
             )
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // 版本信息
         Text(
             text = "HubLink Navigator v1.0.0",
@@ -1607,7 +1608,7 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth()
         )
     }
-    
+
     // 清除缓存对话框
     if (showClearCacheDialog) {
         AlertDialog(
@@ -1639,7 +1640,7 @@ fun SettingsScreen(
             }
         )
     }
-    
+
     // 切换账号对话框
     if (showSwitchAccountDialog) {
         AlertDialog(

@@ -352,7 +352,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun predictCongestion(roadId: String, hours: Int = 2) {
         viewModelScope.launch {
-            when (val result = repository.predictCongestion(roadId, hours)) {
+            when (val result = repository.predictCongestion(roadId = roadId, hours = hours)) {
                 is NetworkResult.Success -> {
                     _congestionData.value = result.data
                 }
@@ -365,8 +365,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchPOIs(type: String? = null) {
         viewModelScope.launch {
-            val mode = if (isProfessionalMode()) "pro" else "personal"
-            when (val result = repository.getPOIs(type, mode)) {
+            val poiType = if (isProfessionalMode()) "truck" else "car"
+            when (val result = repository.getPOIs(type = type ?: poiType)) {
                 is NetworkResult.Success -> {
                     _pois.value = result.data
                 }
