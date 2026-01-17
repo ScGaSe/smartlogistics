@@ -580,9 +580,8 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf(
-                        "truck" to "普通货车",
-                        "hazmat" to "危化品车",
-                        "refrigerated" to "冷链车"
+                        "truck" to "卡车",
+                        "van" to "小型货车"
                     ).forEach { (type, label) ->
                         FilterChip(
                             selected = vehicleType == type,
@@ -918,36 +917,93 @@ enum class TruckRoadCongestionLevel(val label: String, val color: Color, val tex
 
 @Composable
 fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+
     // 状态管理
     var isRefreshing by remember { mutableStateOf(false) }
-    var lastUpdateTime by remember { mutableStateOf("刚刚更新") }
+    var lastUpdateTime by remember { mutableStateOf("") }
     var selectedSegment by remember { mutableStateOf<TruckRoadSegment?>(null) }
     var showDetailDialog by remember { mutableStateOf(false) }
     var aMapInstance by remember { mutableStateOf<AMap?>(null) }
     var currentLocation by remember { mutableStateOf<AMapLocation?>(null) }
 
-    // 模拟货运路段数据（后端接入后替换为真实数据）
-    val roadSegments = remember {
-        listOf(
-            TruckRoadSegment("1", "北门闸口通道", "2.5km", "约6分钟", TruckRoadCongestionLevel.FREE, "道路通畅，货车可正常通行", "50km/h", "限高4.5米"),
-            TruckRoadSegment("2", "3号仓库入口", "1.2km", "约5分钟", TruckRoadCongestionLevel.LIGHT, "等待装卸货车较多，请耐心排队", "25km/h", "限载30吨"),
-            TruckRoadSegment("3", "危化品专用道", "3.8km", "约8分钟", TruckRoadCongestionLevel.FREE, "专用通道畅通，请持证通行", "45km/h", "需危化品通行证"),
-            TruckRoadSegment("4", "集装箱堆场通道", "1.5km", "约12分钟", TruckRoadCongestionLevel.SEVERE, "集卡排队严重，建议绕行南门", "10km/h", "仅限集装箱车辆"),
-            TruckRoadSegment("5", "南门出口通道", "2.0km", "约5分钟", TruckRoadCongestionLevel.LIGHT, "出场车辆较多，注意前方减速", "30km/h"),
-            TruckRoadSegment("6", "冷链物流通道", "1.8km", "约4分钟", TruckRoadCongestionLevel.FREE, "冷链专用道畅通", "40km/h", "冷链车辆优先"),
-            TruckRoadSegment("7", "园区环路主干道", "4.5km", "约10分钟", TruckRoadCongestionLevel.MODERATE, "高峰期车流量大，注意货车限速", "25km/h", "限速40km/h")
-        )
-    }
+    // 后端数据状态
+    var roadSegments by remember { mutableStateOf<List<TruckRoadSegment>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
 
-    // 刷新数据
+    // 闸口名称映射
+    val gateNameMap = mapOf(
+        "Gate_N1" to "北1号闸口",
+        "Gate_N2" to "北2号闸口",
+        "Gate_S1" to "南1号闸口",
+        "Gate_S2" to "南2号闸口",
+        "Gate_E1" to "东1号闸口",
+        "Gate_W1" to "西1号闸口"
+    )
+
+    // 刷新数据 - 调用真实后端API (/traffic/gates)
     val scope = rememberCoroutineScope()
     fun refreshData() {
         scope.launch {
             isRefreshing = true
-            delay(1500) // 模拟网络请求
-            lastUpdateTime = "刚刚更新"
-            isRefreshing = false
+            loadError = null
+            try {
+                // 调用后端闸口排队API
+                val response = withContext(Dispatchers.IO) {
+                    com.example.smartlogistics.network.RetrofitClient.apiService.getGateQueues()
+                }
+                if (response.isSuccessful && response.body() != null) {
+                    val gateData = response.body()!!
+                    // 将闸口数据转换为路段显示
+                    roadSegments = gateData.queues?.map { (gateId, queueCount) ->
+                        val level = when {
+                            queueCount <= 2 -> TruckRoadCongestionLevel.FREE
+                            queueCount <= 5 -> TruckRoadCongestionLevel.LIGHT
+                            queueCount <= 10 -> TruckRoadCongestionLevel.MODERATE
+                            else -> TruckRoadCongestionLevel.SEVERE
+                        }
+                        val description = when (level) {
+                            TruckRoadCongestionLevel.FREE -> "通道畅通，可快速通行"
+                            TruckRoadCongestionLevel.LIGHT -> "排队车辆较少，预计等待5分钟"
+                            TruckRoadCongestionLevel.MODERATE -> "排队车辆较多，预计等待15分钟"
+                            TruckRoadCongestionLevel.SEVERE -> "严重排队，建议选择其他闸口"
+                        }
+                        TruckRoadSegment(
+                            id = gateId,
+                            name = gateNameMap[gateId] ?: gateId,
+                            distance = "-",
+                            estimatedTime = "排队: ${queueCount}辆",
+                            congestionLevel = level,
+                            description = description,
+                            avgSpeed = when (level) {
+                                TruckRoadCongestionLevel.FREE -> "快速通行"
+                                TruckRoadCongestionLevel.LIGHT -> "正常通行"
+                                TruckRoadCongestionLevel.MODERATE -> "缓慢通行"
+                                TruckRoadCongestionLevel.SEVERE -> "拥堵严重"
+                            },
+                            truckRestriction = null
+                        )
+                    }?.sortedBy { it.congestionLevel.ordinal } ?: emptyList()
+
+                    val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                    lastUpdateTime = sdf.format(java.util.Date())
+                    loadError = null
+                } else {
+                    loadError = "获取闸口数据失败: ${response.code()}"
+                }
+            } catch (e: Exception) {
+                loadError = e.message ?: "网络请求失败"
+            } finally {
+                isRefreshing = false
+                isLoading = false
+            }
         }
+    }
+
+    // 初始加载数据
+    LaunchedEffect(Unit) {
+        refreshData()
     }
 
     // 定位到当前位置
@@ -1143,28 +1199,112 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         color = TextPrimary
                     )
                     Text(
-                        text = "共${roadSegments.size}条通道",
+                        text = if (roadSegments.isNotEmpty()) "共${roadSegments.size}条通道" else "",
                         fontSize = 13.sp,
                         color = TextSecondary
                     )
                 }
 
-                // 路段列表
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
-                    items(roadSegments) { segment ->
-                        TruckRoadSegmentCard(
-                            segment = segment,
-                            onClick = {
-                                selectedSegment = segment
-                                showDetailDialog = true
+                // 路段列表 - 带加载和错误状态
+                when {
+                    isLoading -> {
+                        // 加载中状态
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = TruckOrange)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "正在获取道路数据...",
+                                    fontSize = 14.sp,
+                                    color = TextSecondary
+                                )
                             }
-                        )
+                        }
+                    }
+                    loadError != null -> {
+                        // 错误状态
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = loadError ?: "获取数据失败",
+                                    fontSize = 14.sp,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = { refreshData() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = TruckOrange)
+                                ) {
+                                    Text("重试")
+                                }
+                            }
+                        }
+                    }
+                    roadSegments.isEmpty() -> {
+                        // 空数据状态
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Traffic,
+                                    contentDescription = null,
+                                    tint = TextTertiary,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "暂无道路数据",
+                                    fontSize = 14.sp,
+                                    color = TextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(onClick = { refreshData() }) {
+                                    Text("点击刷新", color = TruckOrange)
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        // 正常显示列表
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = 16.dp)
+                        ) {
+                            items(roadSegments) { segment ->
+                                TruckRoadSegmentCard(
+                                    segment = segment,
+                                    onClick = {
+                                        selectedSegment = segment
+                                        showDetailDialog = true
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1741,70 +1881,97 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
     // 获取当前日期用于筛选
     val currentDate = remember { java.time.LocalDate.now() }
 
-    // 完整的历史数据（模拟更多数据）
-    val allHistoryRecords = remember {
-        listOf(
-            // 本周数据（最近7天）
-            HistoryRecord(currentDate.minusDays(0).toString(), "3号仓库 → 北门出口", "普通货物", 15.5, "32分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(1).toString(), "危化品区 → 南门闸口", "危险品", 8.2, "28分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(1).toString(), "集装箱堆场 → 2号仓库", "集装箱", 12.0, "45分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(2).toString(), "冷链区 → 北门出口", "冷链货物", 18.3, "38分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(3).toString(), "1号仓库 → 3号仓库", "普通货物", 5.5, "15分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(4).toString(), "南门入口 → 危化品区", "危险品", 10.8, "35分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(5).toString(), "2号仓库 → 北门出口", "普通货物", 8.0, "22分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(6).toString(), "冷链区 → 1号仓库", "冷链货物", 6.5, "18分钟", "已完成"),
-            // 本月数据（7-30天前）
-            HistoryRecord(currentDate.minusDays(8).toString(), "3号仓库 → 南门出口", "普通货物", 12.0, "28分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(10).toString(), "危化品区 → 北门闸口", "危险品", 9.5, "30分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(12).toString(), "集装箱堆场 → 3号仓库", "集装箱", 10.0, "35分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(15).toString(), "1号仓库 → 冷链区", "冷链货物", 7.0, "20分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(18).toString(), "2号仓库 → 危化品区", "危险品", 11.0, "32分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(20).toString(), "北门入口 → 1号仓库", "普通货物", 6.0, "18分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(22).toString(), "冷链区 → 南门出口", "冷链货物", 15.0, "40分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(25).toString(), "3号仓库 → 集装箱堆场", "集装箱", 8.5, "25分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(28).toString(), "危化品区 → 2号仓库", "危险品", 7.5, "22分钟", "已完成"),
-            // 更早的数据（30天以上）
-            HistoryRecord(currentDate.minusDays(35).toString(), "1号仓库 → 南门出口", "普通货物", 14.0, "35分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(40).toString(), "冷链区 → 3号仓库", "冷链货物", 9.0, "26分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(45).toString(), "集装箱堆场 → 北门出口", "集装箱", 16.0, "42分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(50).toString(), "危化品区 → 1号仓库", "危险品", 8.0, "24分钟", "已完成"),
-            HistoryRecord(currentDate.minusDays(60).toString(), "2号仓库 → 冷链区", "冷链货物", 5.0, "15分钟", "已完成")
-        )
+    // 后端数据状态
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    // 从后端获取报备历史数据
+    val reports by viewModel?.reports?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+
+    // 初始加载数据
+    LaunchedEffect(Unit) {
+        isLoading = true
+        loadError = null
+        try {
+            viewModel?.fetchReports()
+        } catch (e: Exception) {
+            loadError = e.message ?: "获取数据失败"
+        } finally {
+            isLoading = false
+        }
+    }
+
+    // 将后端报备数据转换为历史记录格式
+    val allHistoryRecords = remember(reports) {
+        reports.mapNotNull { report ->
+            // 安全处理可能为空的cargoInfo
+            val cargoType = try { report.cargoInfo.cargoType } catch (e: Exception) { null }
+            val weight = try { report.cargoInfo.weight } catch (e: Exception) { null }
+
+            if (cargoType == null) return@mapNotNull null
+
+            HistoryRecord(
+                date = report.createdAt?.substring(0, 10) ?: currentDate.toString(),
+                route = "$cargoType → ${report.destinationPoiId}",
+                cargoType = cargoType,
+                distance = weight ?: 0.0,
+                duration = "-",
+                status = when (report.status) {
+                    "approved" -> "已完成"
+                    "pending" -> "待审核"
+                    "rejected" -> "已拒绝"
+                    else -> report.status ?: "未知"
+                }
+            )
+        }
     }
 
     // 根据选中的Tab筛选数据
     val filteredRecords = remember(selectedTab, allHistoryRecords) {
-        when (selectedTab) {
-            0 -> { // 本周（本周一到今天）
-                val startOfWeek = currentDate.with(java.time.DayOfWeek.MONDAY)
-                allHistoryRecords.filter {
-                    val recordDate = java.time.LocalDate.parse(it.date)
-                    recordDate >= startOfWeek && recordDate <= currentDate
+        if (allHistoryRecords.isEmpty()) {
+            emptyList()
+        } else {
+            when (selectedTab) {
+                0 -> { // 本周（本周一到今天）
+                    val startOfWeek = currentDate.with(java.time.DayOfWeek.MONDAY)
+                    allHistoryRecords.filter {
+                        try {
+                            val recordDate = java.time.LocalDate.parse(it.date)
+                            recordDate >= startOfWeek && recordDate <= currentDate
+                        } catch (e: Exception) {
+                            false
+                        }
+                    }
                 }
-            }
-            1 -> { // 本月（本月1号到今天）
-                val startOfMonth = currentDate.withDayOfMonth(1)
-                allHistoryRecords.filter {
-                    val recordDate = java.time.LocalDate.parse(it.date)
-                    recordDate >= startOfMonth && recordDate <= currentDate
+                1 -> { // 本月（本月1号到今天）
+                    val startOfMonth = currentDate.withDayOfMonth(1)
+                    allHistoryRecords.filter {
+                        try {
+                            val recordDate = java.time.LocalDate.parse(it.date)
+                            recordDate >= startOfMonth && recordDate <= currentDate
+                        } catch (e: Exception) {
+                            false
+                        }
+                    }
                 }
+                else -> allHistoryRecords // 全部
             }
-            else -> allHistoryRecords // 全部
         }
     }
+
     // 根据筛选后的数据计算统计
     val stats = remember(filteredRecords) {
         val totalOrders = filteredRecords.size
-        val totalDistance = filteredRecords.sumOf { it.distance }
+        val totalDistance = if (filteredRecords.isNotEmpty()) filteredRecords.sumOf { it.distance } else 0.0
 
-        // 计算准时率（模拟：已完成的都算准时）
-        val onTimeCount = filteredRecords.count { it.status == "已完成" }
-        val onTimeRate = if (totalOrders > 0) (onTimeCount * 100 / totalOrders) else 0
+        // 计算准时率（已完成的订单）
+        val completedCount = filteredRecords.count { it.status == "已完成" }
+        val onTimeRate = if (totalOrders > 0) (completedCount * 100 / totalOrders) else 0
 
-        val normalCount = filteredRecords.count { it.cargoType == "普通货物" }
-        val coldChainCount = filteredRecords.count { it.cargoType == "冷链货物" }
-        val hazardousCount = filteredRecords.count { it.cargoType == "危险品" }
-        val containerCount = filteredRecords.count { it.cargoType == "集装箱" }
+        val normalCount = filteredRecords.count { it.cargoType.contains("普通") || it.cargoType.contains("货物") }
+        val coldChainCount = filteredRecords.count { it.cargoType.contains("冷链") }
+        val hazardousCount = filteredRecords.count { it.cargoType.contains("危") || it.cargoType.contains("化") }
+        val containerCount = filteredRecords.count { it.cargoType.contains("集装箱") }
 
         TruckHistoryStats(
             totalOrders = totalOrders,
@@ -1918,38 +2085,96 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 列表内容
-        if (filteredRecords.isEmpty()) {
-            // 空状态
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Rounded.History,
-                        contentDescription = null,
-                        tint = TextTertiary,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "暂无运输记录",
-                        color = TextSecondary,
-                        fontSize = 14.sp
-                    )
+        // 列表内容 - 带加载状态
+        when {
+            isLoading -> {
+                // 加载中状态
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = TruckOrange)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "正在获取历史数据...",
+                            fontSize = 14.sp,
+                            color = TextSecondary
+                        )
+                    }
                 }
             }
-        } else {
-            filteredRecords.forEach { record ->
-                HistoryRecordCard(
-                    record = record,
-                    primaryColor = TruckOrange,
-                    isHazardous = record.cargoType == "危险品"
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+            loadError != null -> {
+                // 错误状态
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.ErrorOutline,
+                            contentDescription = null,
+                            tint = ErrorRed,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = loadError ?: "获取数据失败",
+                            fontSize = 14.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                isLoading = true
+                                loadError = null
+                                viewModel?.fetchReports()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = TruckOrange)
+                        ) {
+                            Text("重试")
+                        }
+                    }
+                }
+            }
+            filteredRecords.isEmpty() -> {
+                // 空状态
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.History,
+                            contentDescription = null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "暂无运输记录",
+                            color = TextSecondary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+            else -> {
+                filteredRecords.forEach { record ->
+                    HistoryRecordCard(
+                        record = record,
+                        primaryColor = TruckOrange,
+                        isHazardous = record.cargoType.contains("危") || record.cargoType.contains("化")
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
             }
         }
 
