@@ -31,8 +31,6 @@ import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.amap.api.maps.MapsInitializer
 import com.example.smartlogistics.network.NotificationService
-import android.os.Build
-import android.content.pm.PackageManager
 
 class MainActivity : FragmentActivity() {
 
@@ -53,10 +51,10 @@ class MainActivity : FragmentActivity() {
         }
 
         // 初始化网络客户端
-        // com.example.smartlogistics.network.RetrofitClient.init(
-        //    context = applicationContext,
-        //    useMock = true
-        // )
+        com.example.smartlogistics.network.RetrofitClient.init(
+            context = applicationContext,
+            useMock = true
+        )
 
         // ⭐ 初始化通知服务
         NotificationService.getInstance().initialize(this)
@@ -66,16 +64,7 @@ class MainActivity : FragmentActivity() {
                 MainAppEntry(viewModel = viewModel)
             }
         }
-
-        // 请求通知权限 (Android 13+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
-            }
-        }
     }
-
 
     // 讯飞SDK初始化（队友B添加）
     private fun initXunfeiSDK() {
@@ -210,6 +199,13 @@ fun MainAppEntry(viewModel: MainViewModel) {
 
             composable("register") {
                 RegisterScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+
+            composable("forgot_password") {
+                ForgotPasswordScreen(
                     navController = navController,
                     viewModel = viewModel
                 )

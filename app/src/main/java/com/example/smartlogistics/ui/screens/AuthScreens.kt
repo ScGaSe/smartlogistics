@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -335,7 +336,7 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { /* TODO */ }) {
+                        TextButton(onClick = { navController.navigate("forgot_password") }) {
                             Text(
                                 text = "忘记密码?",
                                 color = BrandBlue,
@@ -381,7 +382,7 @@ fun LoginScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 指纹登录 - 修复后的点击事件
+                        // 指纹登录
                         BiometricLoginButton(
                             icon = Icons.Rounded.Fingerprint,
                             contentDescription = "指纹登录",
@@ -409,18 +410,6 @@ fun LoginScreen(
                                 } else {
                                     showBiometricNotAvailable = true
                                 }
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.width(24.dp))
-
-                        // 人脸登录
-                        BiometricLoginButton(
-                            icon = Icons.Rounded.Face,
-                            contentDescription = "人脸登录",
-                            isAvailable = false, // 暂不实现
-                            onClick = {
-                                Toast.makeText(context, "人脸登录功能开发中", Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
