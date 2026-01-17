@@ -1,5 +1,6 @@
 package com.example.smartlogistics.ui.screens
 
+import CongestionDataPoint
 import CongestionDetailCard
 import TTITrendChart
 import TimeRangeSelector
@@ -75,11 +76,7 @@ import com.example.smartlogistics.utils.ParkingManager
 import kotlinx.coroutines.delay
 import java.io.File
 import coil.compose.rememberAsyncImagePainter
-import com.amap.api.services.core.LatLonPoint
-import com.amap.api.services.core.AMapException
-import com.amap.api.services.core.PoiItem
-import com.amap.api.services.poisearch.PoiResult
-import com.amap.api.services.poisearch.PoiSearch
+import getTTILevel
 
 // ==================== 行程OCR识别结果数据类 ====================
 data class TripOcrResult(
@@ -2181,20 +2178,67 @@ private fun CarTrafficLegendItem(color: Color, label: String) {
 // ==================== 拥堵预测页面 ====================
 @Composable
 fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    // 数据状态
-    val congestionData = remember { generateMockCongestionData() }
-    var selectedTimeRange by remember { mutableStateOf("今天") }
-    var selectedDataIndex by remember { mutableStateOf(10) } // 默认选中16:00
+    // ★★★ 所有数据从后端获取 ★★★
+    val congestionResponse by viewModel?.congestionData?.collectAsState() ?: remember { mutableStateOf(null) }
+    val parkingList by viewModel?.parkingList?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
 
-    // 模拟停车场入口数据
-    val parkingEntrances = remember {
-        listOf(
-            Triple("P1停车场入口", "300m", CongestionLevel.FREE),
-            Triple("P2停车场入口", "500m", CongestionLevel.LIGHT),
-            Triple("P3停车场入口", "800m", CongestionLevel.MODERATE),
-            Triple("航站楼落客区", "200m", CongestionLevel.SEVERE),
-            Triple("高铁站停车场", "1.2km", CongestionLevel.LIGHT)
-        )
+    var isLoading by remember { mutableStateOf(true) }
+    var selectedTimeRange by remember { mutableStateOf("实时") }
+    var selectedDataIndex by remember { mutableStateOf(0) }
+
+    // ★★★ 根据时间选择计算API参数 ★★★
+    val hoursOffset = when (selectedTimeRange) {
+        "实时" -> 0
+        "今天" -> 0
+        "明天" -> 24
+        "后天" -> 48
+        else -> 0
+    }
+    val predictHours = when (selectedTimeRange) {
+        "实时" -> 3      // 实时：预测未来3小时
+        "今天" -> 12     // 今天：预测12小时
+        "明天" -> 24     // 明天：预测24小时
+        "后天" -> 24     // 后天：预测24小时
+        else -> 5
+    }
+
+    // ★★★ 时间选择变化时重新调用API ★★★
+    LaunchedEffect(selectedTimeRange) {
+        isLoading = true
+        viewModel?.predictCongestion(roadId = "airport_expressway", hours = predictHours)
+        viewModel?.fetchAllParking()
+        kotlinx.coroutines.delay(800)
+        isLoading = false
+    }
+
+    // 后端返回的拥堵预测数据转换为UI格式
+    val congestionData = remember(congestionResponse) {
+        congestionResponse?.data?.predictions?.map { pred ->
+            CongestionDataPoint(
+                time = pred.time,
+                ttiIndex = pred.tti,
+                level = getTTILevel(pred.tti)
+            )
+        } ?: emptyList()
+    }
+
+    val serverSuggestion = congestionResponse?.data?.suggestion
+    val rawRoadName = congestionResponse?.data?.roadName
+    val currentTti = congestionResponse?.data?.currentTti
+
+    // ★★★ 道路名称中文映射 ★★★
+    val roadName = when (rawRoadName) {
+        "main_road" -> "机场高速"
+        "airport_expressway" -> "机场高速"
+        "truck_main_road" -> "货运主干道"
+        "terminal_road" -> "航站楼连接路"
+        else -> rawRoadName ?: "主干道"
+    }
+
+    LaunchedEffect(congestionData) {
+        if (congestionData.isNotEmpty()) {
+            selectedDataIndex = 0
+        }
     }
 
     DetailScreenTemplate(
@@ -2202,174 +2246,211 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
         title = "拥堵预测",
         backgroundColor = BackgroundPrimary
     ) {
-        // 时间选择器
+        // 当前道路信息（始终显示）
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = CarGreenLight)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = roadName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    if (currentTti != null) {
+                        Text(text = "当前TTI: ${"%.1f".format(currentTti)}", fontSize = 13.sp, color = TextSecondary)
+                    } else {
+                        Text(text = "加载中...", fontSize = 13.sp, color = TextSecondary)
+                    }
+                }
+                if (currentTti != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = getTTILevel(currentTti).color.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = getTTILevel(currentTti).label,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = getTTILevel(currentTti).color
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ★★★ 时间选择器（点击会触发API调用）★★★
         TimeRangeSelector(
             selectedRange = selectedTimeRange,
-            onRangeSelected = { selectedTimeRange = it },
+            onRangeSelected = { newRange ->
+                if (newRange != selectedTimeRange) {
+                    selectedTimeRange = newRange  // 这会触发LaunchedEffect重新调用API
+                }
+            },
             primaryColor = CarGreen
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 图表卡片
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        if (isLoading) {
+            // 加载状态
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "道路拥堵趋势预测",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-
-                    // 图例
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CongestionLevel.values().take(3).forEach { level ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(level.color, CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = level.label,
-                                    fontSize = 10.sp,
-                                    color = TextSecondary
-                                )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = CarGreen)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = "正在获取${selectedTimeRange}预测数据...", fontSize = 14.sp, color = TextSecondary)
+                    }
+                }
+            }
+        } else if (congestionData.isEmpty()) {
+            // 后端无数据
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(imageVector = Icons.Rounded.CloudOff, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "暂无${selectedTimeRange}预测数据", fontSize = 15.sp, color = TextSecondary)
+                    Text(text = "请检查网络连接或稍后重试", fontSize = 13.sp, color = TextTertiary)
+                }
+            }
+        } else {
+            // 图表卡片
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "${selectedTimeRange}拥堵趋势预测", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            CongestionLevel.values().take(3).forEach { level ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(8.dp).background(level.color, CircleShape))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(text = level.label, fontSize = 10.sp, color = TextSecondary)
+                                }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TTITrendChart(
+                        data = congestionData,
+                        selectedIndex = selectedDataIndex,
+                        onPointSelected = { selectedDataIndex = it },
+                        primaryColor = CarGreen
+                    )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-                // TTI趋势图
-                TTITrendChart(
-                    data = congestionData,
-                    selectedIndex = selectedDataIndex,
-                    onPointSelected = { selectedDataIndex = it },
-                    primaryColor = CarGreen
+            // 选中时间点详情
+            congestionData.getOrNull(selectedDataIndex)?.let { dataPoint ->
+                CongestionDetailCard(dataPoint = dataPoint, primaryColor = CarGreen)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 智能建议（后端返回）
+            if (serverSuggestion != null) {
+                TipCard(
+                    text = serverSuggestion,
+                    icon = Icons.Rounded.Lightbulb,
+                    backgroundColor = CarGreenLight,
+                    iconColor = CarGreen
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 选中时间点详情
-        CongestionDetailCard(
-            dataPoint = congestionData[selectedDataIndex],
-            primaryColor = CarGreen
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // 智能建议
-        val selectedData = congestionData[selectedDataIndex]
-        val suggestion = when (selectedData.level) {
-            CongestionLevel.FREE -> "当前时段路况良好，适合出行！"
-            CongestionLevel.LIGHT -> "轻微缓行，预计延误5-10分钟。"
-            CongestionLevel.MODERATE -> "建议提前15分钟出发，或选择备用路线。"
-            CongestionLevel.SEVERE -> "严重拥堵！建议改乘公共交通或延后出行。"
-        }
-
-        TipCard(
-            text = suggestion,
-            icon = Icons.Rounded.Lightbulb,
-            backgroundColor = CarGreenLight,
-            iconColor = CarGreen
-        )
-
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 停车场入口状态
-        Text(
-            text = "停车场入口实时状态",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
-
+        // ★★★ 停车场实时状态（后端数据）★★★
+        Text(text = "停车场实时状态", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
 
-        parkingEntrances.forEach { (name, distance, level) ->
+        if (parkingList.isEmpty()) {
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
-                    .clickable { navController.navigate("navigation_map") },
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.LocalParking,
-                            contentDescription = null,
-                            tint = CarGreen,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = name,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = distance,
-                                fontSize = 12.sp,
-                                color = TextSecondary
-                            )
-                        }
+                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = CarGreen, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text(text = "暂无停车场数据", fontSize = 14.sp, color = TextSecondary)
                     }
+                }
+            }
+        } else {
+            parkingList.forEach { parking ->
+                val occupancyRate = if (parking.totalSpots > 0) 1f - (parking.availableSpots.toFloat() / parking.totalSpots) else 0f
+                val level = when {
+                    occupancyRate < 0.5f -> CongestionLevel.FREE
+                    occupancyRate < 0.7f -> CongestionLevel.LIGHT
+                    occupancyRate < 0.9f -> CongestionLevel.MODERATE
+                    else -> CongestionLevel.SEVERE
+                }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = level.color.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = level.label,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = level.color
-                            )
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { navController.navigate("navigation_map") },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Rounded.LocalParking, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(text = parking.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                                Text(text = "空位: ${parking.availableSpots}/${parking.totalSpots} · ${parking.price}", fontSize = 12.sp, color = TextSecondary)
+                            }
                         }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = TextTertiary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = level.color.copy(alpha = 0.15f)) {
+                                Text(text = level.label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = level.color)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }
         }
 
-        // 底部留白
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
+
+
 // ==================== 历史数据页面 ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

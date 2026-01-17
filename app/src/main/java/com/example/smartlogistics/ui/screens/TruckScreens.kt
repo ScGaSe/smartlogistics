@@ -1,5 +1,6 @@
 package com.example.smartlogistics.ui.screens
 
+import CongestionDataPoint
 import CongestionDetailCard
 import RoadCongestionList
 import TTITrendChart
@@ -62,6 +63,7 @@ import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.LatLng
 import com.amap.api.location.AMapLocation
+import getTTILevel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
@@ -69,7 +71,6 @@ import java.net.URLEncoder
 // ==================== 货运司机主页 ====================
 @Composable
 fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    // 1. 扩展菜单项
     val menuItems = listOf(
         MenuItem("车辆绑定", Icons.Rounded.LocalShipping, "truck_bind"),
         MenuItem("路线规划", Icons.Rounded.Route, "truck_route"),
@@ -78,12 +79,15 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
         MenuItem("历史数据", Icons.Rounded.History, "truck_history"),
         MenuItem("货物报备", Icons.Rounded.Assignment, "cargo_report")
     )
+
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val reports by viewModel?.reports?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+
     LaunchedEffect(Unit) {
         viewModel?.fetchVehicles()
         viewModel?.fetchReports()
     }
+
     Column(modifier = Modifier.fillMaxSize().background(BackgroundPrimary)) {
         DashboardHeader(
             title = "智运货车版",
@@ -94,6 +98,7 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             onSearchClick = { navController.navigate("navigation_map") },
             onAiClick = { navController.navigate("ai_chat") }
         )
+
         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             val pendingReport = reports.firstOrNull { it.status == "pending" }
             if (pendingReport != null) {
@@ -101,12 +106,15 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                     PendingTaskCard(title = "待处理报备", description = "您有1条货物报备待确认", onClick = { navController.navigate("cargo_report") })
                 }
             }
+
             item {
                 QuickStatsCard(items = listOf("今日运单" to "12", "总里程" to "2,486km", "准时率" to "98%"), backgroundColor = TruckOrange)
             }
+
             item {
                 Text(text = "常用功能", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             }
+
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     menuItems.chunked(2).forEach { rowItems ->
@@ -121,10 +129,12 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                     }
                 }
             }
+
             item {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(text = "最近报备", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
+
             if (reports.isEmpty()) {
                 item {
                     EmptyState(icon = Icons.Rounded.Assignment, title = "暂无报备记录", subtitle = "完成首次货物报备后将显示在这里", actionText = "去报备", onAction = { navController.navigate("cargo_report") })
@@ -132,6 +142,7 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
             } else {
                 items(reports.take(3)) { report -> RecentReportCard(report = report) }
             }
+
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
@@ -1450,23 +1461,65 @@ private fun TruckDetailInfoRow(
     }
 }
 
+
 // ==================== 拥堵预测页面 ====================
 @Composable
 fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    // 数据状态
-    val congestionData = remember { generateMockCongestionData() }
-    var selectedTimeRange by remember { mutableStateOf("今天") }
-    var selectedDataIndex by remember { mutableStateOf(10) } // 默认选中16:00
+    // ★★★ 所有数据从后端获取 ★★★
+    val congestionResponse by viewModel?.congestionData?.collectAsState() ?: remember { mutableStateOf(null) }
+    val gateQueues by viewModel?.gateQueues?.collectAsState() ?: remember { mutableStateOf(emptyMap()) }
 
-    // 模拟货运主干道数据
-    val truckRoads = remember {
-        listOf(
-            Triple("北门闸口通道", "2.5km", CongestionLevel.MODERATE),
-            Triple("3号仓库入口", "1.2km", CongestionLevel.LIGHT),
-            Triple("危化品专用道", "3.8km", CongestionLevel.FREE),
-            Triple("集装箱堆场通道", "1.5km", CongestionLevel.SEVERE),
-            Triple("南门出口通道", "2.0km", CongestionLevel.LIGHT)
-        )
+    var isLoading by remember { mutableStateOf(true) }
+    var selectedTimeRange by remember { mutableStateOf("实时") }
+    var selectedDataIndex by remember { mutableStateOf(0) }
+
+    // ★★★ 根据时间选择计算API参数 ★★★
+    val predictHours = when (selectedTimeRange) {
+        "实时" -> 3
+        "今天" -> 12
+        "明天" -> 24
+        "后天" -> 24
+        else -> 5
+    }
+
+    // ★★★ 时间选择变化时重新调用API ★★★
+    LaunchedEffect(selectedTimeRange) {
+        isLoading = true
+        viewModel?.predictCongestion(roadId = "cargo_main_road", hours = predictHours)
+        viewModel?.fetchGateQueues()
+        kotlinx.coroutines.delay(800)
+        isLoading = false
+    }
+
+    // 后端返回的拥堵预测数据转换为UI格式
+    val congestionData = remember(congestionResponse) {
+        congestionResponse?.data?.predictions?.map { pred ->
+            CongestionDataPoint(
+                time = pred.time,
+                ttiIndex = pred.tti,
+                level = getTTILevel(pred.tti)
+            )
+        } ?: emptyList()
+    }
+
+    val serverSuggestion = congestionResponse?.data?.suggestion
+    val rawRoadName = congestionResponse?.data?.roadName
+    val currentTti = congestionResponse?.data?.currentTti
+
+    // ★★★ 道路名称中文映射 ★★★
+    val roadName = when (rawRoadName) {
+        "main_road" -> "货运主干道"
+        "truck_main_road" -> "货运主干道"
+        "cargo_main_road" -> "货运主干道"
+        "container_road" -> "集装箱通道"
+        "hazmat_road" -> "危化品专用道"
+        else -> rawRoadName ?: "货运主干道"
+    }
+
+    LaunchedEffect(congestionData) {
+        if (congestionData.isNotEmpty()) {
+            selectedDataIndex = 0
+        }
     }
 
     DetailScreenTemplate(
@@ -1474,110 +1527,207 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
         title = "拥堵预测",
         backgroundColor = BackgroundPrimary
     ) {
-        // 时间选择器
-        TimeRangeSelector(
-            selectedRange = selectedTimeRange,
-            onRangeSelected = { selectedTimeRange = it },
-            primaryColor = TruckOrange
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 图表卡片
+        // 当前道路信息
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = TruckOrangeLight)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "货运主干道拥堵趋势",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-
-                    // 图例
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CongestionLevel.values().take(3).forEach { level ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(level.color, CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = level.label,
-                                    fontSize = 10.sp,
-                                    color = TextSecondary
-                                )
-                            }
-                        }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = roadName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    if (currentTti != null) {
+                        Text(text = "当前TTI: ${"%.1f".format(currentTti)}", fontSize = 13.sp, color = TextSecondary)
+                    } else {
+                        Text(text = "加载中...", fontSize = 13.sp, color = TextSecondary)
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // TTI趋势图
-                TTITrendChart(
-                    data = congestionData,
-                    selectedIndex = selectedDataIndex,
-                    onPointSelected = { selectedDataIndex = it },
-                    primaryColor = TruckOrange
-                )
+                if (currentTti != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = getTTILevel(currentTti).color.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = getTTILevel(currentTti).label,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = getTTILevel(currentTti).color
+                        )
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 选中时间点详情
-        CongestionDetailCard(
-            dataPoint = congestionData[selectedDataIndex],
+        // ★★★ 时间选择器（点击会触发API调用）★★★
+        TimeRangeSelector(
+            selectedRange = selectedTimeRange,
+            onRangeSelected = { newRange ->
+                if (newRange != selectedTimeRange) {
+                    selectedTimeRange = newRange
+                }
+            },
             primaryColor = TruckOrange
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 智能建议
-        val selectedData = congestionData[selectedDataIndex]
-        val suggestion = when (selectedData.level) {
-            CongestionLevel.FREE -> "当前时段路况畅通，建议此时出行。"
-            CongestionLevel.LIGHT -> "轻微缓行，预计延误5-10分钟。"
-            CongestionLevel.MODERATE -> "建议避开此时段，或选择备用路线。"
-            CongestionLevel.SEVERE -> "严重拥堵！建议推迟1-2小时出发。"
+        if (isLoading) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = TruckOrange)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(text = "正在获取${selectedTimeRange}预测数据...", fontSize = 14.sp, color = TextSecondary)
+                    }
+                }
+            }
+        } else if (congestionData.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(imageVector = Icons.Rounded.CloudOff, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "暂无${selectedTimeRange}预测数据", fontSize = 15.sp, color = TextSecondary)
+                    Text(text = "请检查网络连接或稍后重试", fontSize = 13.sp, color = TextTertiary)
+                }
+            }
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "${selectedTimeRange}拥堵趋势预测", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            CongestionLevel.values().take(3).forEach { level ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(8.dp).background(level.color, CircleShape))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(text = level.label, fontSize = 10.sp, color = TextSecondary)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TTITrendChart(
+                        data = congestionData,
+                        selectedIndex = selectedDataIndex,
+                        onPointSelected = { selectedDataIndex = it },
+                        primaryColor = TruckOrange
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            congestionData.getOrNull(selectedDataIndex)?.let { dataPoint ->
+                CongestionDetailCard(dataPoint = dataPoint, primaryColor = TruckOrange)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            if (serverSuggestion != null) {
+                TipCard(
+                    text = serverSuggestion,
+                    icon = Icons.Rounded.Lightbulb,
+                    backgroundColor = TruckOrangeLight,
+                    iconColor = TruckOrange
+                )
+            }
         }
-
-        TipCard(
-            text = suggestion,
-            icon = Icons.Rounded.Lightbulb,
-            backgroundColor = TruckOrangeLight,
-            iconColor = TruckOrange
-        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 各路段拥堵状态
-        Text(
-            text = "货运通道实时状态",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
-
+        // ★★★ 闸口排队状态（后端数据）★★★
+        Text(text = "闸口排队实时状态", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(modifier = Modifier.height(12.dp))
 
-        RoadCongestionList(
-            roads = truckRoads,
-            primaryColor = TruckOrange
-        )
+        if (gateQueues.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = TruckOrange, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text(text = "暂无闸口数据", fontSize = 14.sp, color = TextSecondary)
+                    }
+                }
+            }
+        } else {
+            gateQueues.forEach { (gateName, queueCount) ->
+                val level = when {
+                    queueCount == 0 -> CongestionLevel.FREE
+                    queueCount <= 2 -> CongestionLevel.LIGHT
+                    queueCount <= 5 -> CongestionLevel.MODERATE
+                    else -> CongestionLevel.SEVERE
+                }
+                val displayName = when (gateName) {
+                    "Gate_N1" -> "北1号闸口"
+                    "Gate_N2" -> "北2号闸口"
+                    "Gate_S1" -> "南1号闸口"
+                    "Gate_E1" -> "东1号闸口"
+                    else -> gateName
+                }
 
-        // 底部留白
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { navController.navigate("navigation_map") },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Rounded.DoorFront, contentDescription = null, tint = TruckOrange, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(text = displayName, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                                Text(text = "排队车辆: ${queueCount}辆", fontSize = 12.sp, color = TextSecondary)
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = level.color.copy(alpha = 0.15f)) {
+                                Text(text = level.label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = level.color)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
@@ -2394,99 +2544,6 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                                 modifier = Modifier.size(24.dp)
                                             )
                                         }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // ========== 危险品类别选择器（13类） ==========
-                    Text(
-                        text = "选择危险品类别",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 使用 LazyRow 横向滚动展示所有13类危险品
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(HazmatRecognitionHelper.HAZMAT_CLASSES.values.toList()) { hazmatClass ->
-                            val isSelected = hazardClass == hazmatClass.name
-                            Card(
-                                modifier = Modifier
-                                    .width(100.dp)
-                                    .clickable {
-                                        hazardClass = hazmatClass.name
-                                        // 同步更新识别结果状态
-                                        hazmatRecognitionResult = HazmatRecognitionResult(
-                                            hazmatClass = hazmatClass,
-                                            confidence = 1.0f,
-                                            isHazardous = true,
-                                            classIndex = hazmatClass.code.toIntOrNull() ?: -1
-                                        )
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected)
-                                        Color(hazmatClass.colorInt).copy(alpha = 0.2f)
-                                    else
-                                        Color.White
-                                ),
-                                border = BorderStroke(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) Color(hazmatClass.colorInt) else BorderLight
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    // 类别图标/编号
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .background(
-                                                Color(hazmatClass.colorInt).copy(alpha = if (isSelected) 1f else 0.7f),
-                                                RoundedCornerShape(8.dp)
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = hazmatClass.icon,
-                                            fontSize = 18.sp
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    // 类别名称
-                                    Text(
-                                        text = hazmatClass.name,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) Color(hazmatClass.colorInt) else TextPrimary,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 2,
-                                        lineHeight = 14.sp
-                                    )
-
-                                    // 选中标识
-                                    if (isSelected) {
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Icon(
-                                            imageVector = Icons.Rounded.CheckCircle,
-                                            contentDescription = "已选择",
-                                            tint = Color(hazmatClass.colorInt),
-                                            modifier = Modifier.size(16.dp)
-                                        )
                                     }
                                 }
                             }

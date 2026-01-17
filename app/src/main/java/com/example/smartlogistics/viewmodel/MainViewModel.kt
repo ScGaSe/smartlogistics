@@ -78,6 +78,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pois = MutableStateFlow<List<POI>>(emptyList())
     val pois: StateFlow<List<POI>> = _pois.asStateFlow()
 
+    // ==================== 停车场列表 ====================
+    private val _parkingList = MutableStateFlow<List<ParkingInfo>>(emptyList())
+    val parkingList: StateFlow<List<ParkingInfo>> = _parkingList.asStateFlow()
+
+    // ==================== 闸口排队数据 ====================
+    private val _gateQueues = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val gateQueues: StateFlow<Map<String, Int>> = _gateQueues.asStateFlow()
+
     // ==================== 认证方法 ====================
 
     fun register(phoneNumber: String, password: String, role: String) {
@@ -92,6 +100,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is NetworkResult.Exception -> {
                     _authState.value = AuthState.Error(result.throwable.message ?: "注册失败")
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // ==================== 停车场列表方法 ====================
+    fun fetchAllParking() {
+        viewModelScope.launch {
+            when (val result = repository.getAllParking()) {
+                is NetworkResult.Success -> {
+                    _parkingList.value = result.data
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // ==================== 闸口排队方法 ====================
+    fun fetchGateQueues() {
+        viewModelScope.launch {
+            when (val result = repository.getGateQueues()) {
+                is NetworkResult.Success -> {
+                    _gateQueues.value = result.data
                 }
                 else -> {}
             }
