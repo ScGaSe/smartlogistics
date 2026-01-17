@@ -131,43 +131,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 登录方法 - 登录后校验角色是否匹配
+     * 登录方法 - 登录后获取用户信息并校验角色
      */
     fun login(username: String, password: String, selectedRole: String) {
+        android.util.Log.d("LOGIN_DEBUG", "========== 开始登录 ==========")
+        android.util.Log.d("LOGIN_DEBUG", "用户名: $username")
+        android.util.Log.d("LOGIN_DEBUG", "用户选择的角色: $selectedRole")
+        
         viewModelScope.launch {
             _authState.value = AuthState.Loading
 
             when (val result = repository.login(username, password)) {
                 is NetworkResult.Success -> {
-                    val userInfo = result.data.userInfo
-                    val actualRole = userInfo?.role ?: "personal"
-                    val targetHome = if (actualRole == "professional") "truck_home" else "car_home"
+                    android.util.Log.d("LOGIN_DEBUG", "✓ 登录接口成功，开始获取用户信息...")
                     
-                    // 检查用户选择的角色与账号实际角色是否匹配
-                    if (selectedRole == actualRole) {
-                        // 角色匹配，正常登录
-                        _isLoggedIn.value = true
-                        _userInfo.value = userInfo
-                        _userRole.value = actualRole
-                        _authState.value = AuthState.LoginSuccess(targetHome)
-                    } else {
-                        // 角色不匹配，提示用户
-                        _userInfo.value = userInfo  // 暂存用户信息
-                        _authState.value = AuthState.RoleMismatch(
-                            selectedRole = selectedRole,
-                            actualRole = actualRole,
-                            targetHome = targetHome
-                        )
+                    when (val meResult = repository.getCurrentUser()) {
+                        is NetworkResult.Success -> {
+                            val userInfo = meResult.data
+                            val actualRole = userInfo.role
+                            val targetHome = if (actualRole == "professional") "truck_home" else "car_home"
+                            
+                            android.util.Log.d("LOGIN_DEBUG", "✓ 获取用户信息成功")
+                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.id: ${userInfo.id}")
+                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.role: '${userInfo.role}'")
+                            android.util.Log.d("LOGIN_DEBUG", "  userInfo.phoneNumber: ${userInfo.phoneNumber}")
+                            android.util.Log.d("LOGIN_DEBUG", "  selectedRole: '$selectedRole'")
+                            android.util.Log.d("LOGIN_DEBUG", "  actualRole: '$actualRole'")
+                            android.util.Log.d("LOGIN_DEBUG", "  比较结果: selectedRole == actualRole ? ${selectedRole == actualRole}")
+                            android.util.Log.d("LOGIN_DEBUG", "  targetHome: $targetHome")
+                            
+                            if (selectedRole == actualRole) {
+                                android.util.Log.d("LOGIN_DEBUG", "→ 角色匹配，正常登录到 $targetHome")
+                                _isLoggedIn.value = true
+                                _userInfo.value = userInfo
+                                _userRole.value = actualRole
+                                _authState.value = AuthState.LoginSuccess(targetHome)
+                            } else {
+                                android.util.Log.d("LOGIN_DEBUG", "→ 角色不匹配！弹出切换对话框")
+                                _userInfo.value = userInfo
+                                _authState.value = AuthState.RoleMismatch(
+                                    selectedRole = selectedRole,
+                                    actualRole = actualRole,
+                                    targetHome = targetHome
+                                )
+                            }
+                        }
+                        is NetworkResult.Error -> {
+                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息失败: ${meResult.message}")
+                            _authState.value = AuthState.Error("获取用户信息失败: ${meResult.message}")
+                        }
+                        is NetworkResult.Exception -> {
+                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息异常: ${meResult.throwable.message}")
+                            meResult.throwable.printStackTrace()
+                            _authState.value = AuthState.Error("获取用户信息失败")
+                        }
+                        else -> {
+                            android.util.Log.e("LOGIN_DEBUG", "✗ 获取用户信息返回未知状态")
+                        }
                     }
                 }
                 is NetworkResult.Error -> {
+                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录失败: ${result.message}")
                     _authState.value = AuthState.Error(result.message)
                 }
                 is NetworkResult.Exception -> {
+                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录异常: ${result.throwable.message}")
+                    result.throwable.printStackTrace()
                     _authState.value = AuthState.Error(result.throwable.message ?: "登录失败")
                 }
-                else -> {}
+                else -> {
+                    android.util.Log.e("LOGIN_DEBUG", "✗ 登录返回未知状态")
+                }
             }
+            android.util.Log.d("LOGIN_DEBUG", "========== 登录流程结束 ==========")
         }
     }
     
