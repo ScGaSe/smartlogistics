@@ -229,8 +229,7 @@ fun LocationShareScreen(
             }
             "view" -> {
                 // 查看共享模式：获取共享详情并连接WebSocket
-                // 统一转小写，确保与发起者在同一channel
-                shareId?.lowercase()?.let { id ->
+                shareId?.let { id ->
                     isLoading = true
                     when (val result = repository.getLocationShareDetail(id)) {
                         is NetworkResult.Success -> {
@@ -265,6 +264,22 @@ fun LocationShareScreen(
             webSocketManager?.release()
             realWebSocketManager?.release()
             mapView?.onDestroy()
+        }
+    }
+
+    // ✅ 新增：监听WebSocket连接状态，连接成功后立即发送位置
+    LaunchedEffect(mode, isSharing) {
+        if (mode == "share" && isSharing) {
+            val wsManager = if (Repository.USE_LOCAL_MOCK) null else realWebSocketManager
+            wsManager?.connectionState?.collect { state ->
+                if (state == WebSocketManager.ConnectionState.Connected) {
+                    // WebSocket连接成功，立即发送当前位置
+                    myLocation?.let { loc ->
+                        android.util.Log.d("LocationShare", "WebSocket connected, sending initial location")
+                        wsManager.sendLocation(loc.latitude, loc.longitude, null, null, null)
+                    }
+                }
+            }
         }
     }
 
@@ -338,6 +353,27 @@ fun LocationShareScreen(
                                     this.map.let { map ->
                                         updateMyMarker(map, myLocation!!, myMarker) { myMarker = it }
                                         map.moveCamera(CameraUpdateFactory.newLatLngZoom(myLocation!!, 15f))
+                                    }
+
+                                    // ✅ 修复：如果是发起共享模式且正在共享，发送位置到WebSocket
+                                    if (mode == "share" && isSharing) {
+                                        if (Repository.USE_LOCAL_MOCK) {
+                                            webSocketManager?.sendLocation(
+                                                location.latitude,
+                                                location.longitude,
+                                                location.accuracy,
+                                                location.speed,
+                                                location.bearing
+                                            )
+                                        } else {
+                                            realWebSocketManager?.sendLocation(
+                                                location.latitude,
+                                                location.longitude,
+                                                location.accuracy,
+                                                location.speed,
+                                                location.bearing
+                                            )
+                                        }
                                     }
                                 }
                             }
