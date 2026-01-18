@@ -230,16 +230,17 @@ fun LocationShareScreen(
             "view" -> {
                 // 查看共享模式：获取共享详情并连接WebSocket
                 shareId?.let { id ->
+                    val normalizedId = id.lowercase()  // ✅ 统一转小写，确保与分享方一致
                     isLoading = true
-                    when (val result = repository.getLocationShareDetail(id)) {
+                    when (val result = repository.getLocationShareDetail(normalizedId)) {
                         is NetworkResult.Success -> {
                             shareDetail = result.data
 
                             // 连接WebSocket接收位置
                             if (Repository.USE_LOCAL_MOCK) {
-                                webSocketManager?.connect(id)
+                                webSocketManager?.connect(normalizedId)
                             } else {
-                                realWebSocketManager?.connect(id)
+                                realWebSocketManager?.connect(normalizedId)
                             }
                         }
                         is NetworkResult.Error -> {
