@@ -168,14 +168,26 @@ fun LocationShareScreen(
                     }
                     is WebSocketManager -> {
                         manager.locationUpdates.collect { locationMsg ->
-                            otherLocation = LatLng(locationMsg.latitude, locationMsg.longitude)
-                            lastUpdateTime = locationMsg.timestamp
+                            android.util.Log.d("LocationShare", "Received message type: ${locationMsg.type}")
 
-                            aMap?.let { map ->
-                                updateOtherMarker(map, otherLocation!!, otherMarker) { otherMarker = it }
+                            // 检查是否是分享结束消息
+                            if (locationMsg.type == "share_ended") {
+                                android.util.Log.d("LocationShare", "Share ended message received!")
+                                showShareEndedDialog = true
+                                return@collect
+                            }
 
-                                if (myLocation != null && otherLocation != null) {
-                                    drawRoute(map, myLocation!!, otherLocation!!, routePolyline) { routePolyline = it }
+                            // 处理位置消息
+                            if (locationMsg.type == "location") {
+                                otherLocation = LatLng(locationMsg.latitude, locationMsg.longitude)
+                                lastUpdateTime = locationMsg.timestamp
+
+                                aMap?.let { map ->
+                                    updateOtherMarker(map, otherLocation!!, otherMarker) { otherMarker = it }
+
+                                    if (myLocation != null && otherLocation != null) {
+                                        drawRoute(map, myLocation!!, otherLocation!!, routePolyline) { routePolyline = it }
+                                    }
                                 }
                             }
                         }
@@ -282,25 +294,6 @@ fun LocationShareScreen(
                         android.util.Log.d("LocationShare", "WebSocket connected, sending initial location")
                         wsManager.sendLocation(loc.latitude, loc.longitude, null, null, null)
                     }
-                }
-            }
-        }
-    }
-
-    // ✅ 新增：查看模式下监听WebSocket断开，提示分享已结束
-    LaunchedEffect(mode) {
-        if (mode == "view") {
-            val wsManager = if (Repository.USE_LOCAL_MOCK) null else realWebSocketManager
-            wsManager?.connectionState?.collect { state ->
-                when (state) {
-                    is WebSocketManager.ConnectionState.Disconnected,
-                    is WebSocketManager.ConnectionState.Error -> {
-                        // 如果之前已经连接成功过（有收到过位置），说明是对方停止了共享
-                        if (otherLocation != null || lastUpdateTime != null) {
-                            showShareEndedDialog = true
-                        }
-                    }
-                    else -> {}
                 }
             }
         }
@@ -497,6 +490,13 @@ fun LocationShareScreen(
                     onClick = {
                         showStopDialog = false
                         scope.launch {
+                            // 先发送分享结束消息通知查看方
+                            realWebSocketManager?.sendShareEnded()
+
+                            // 等待消息发送出去
+                            kotlinx.coroutines.delay(200)
+
+                            // 停止共享
                             tripId?.let { id ->
                                 repository.stopLocationShare(id)
                             }
