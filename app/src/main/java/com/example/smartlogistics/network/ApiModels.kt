@@ -128,7 +128,8 @@ data class CargoInfo(
 data class SubmitReportRequest(
     @SerializedName("vehicle_id") val vehicleId: Int,
     @SerializedName("destination_poi_id") val destinationPoiId: String,
-    @SerializedName("cargo_info") val cargoInfo: CargoInfo
+    @SerializedName("estimated_arrival_time") val estimatedArrivalTime: String,
+    @SerializedName("cargo_info") val cargoInfo: CargoInfo? = null
 )
 
 data class ReportListResponse(

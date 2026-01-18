@@ -205,8 +205,7 @@ interface ApiService {
      */
     @GET("pois")
     suspend fun getPois(
-        @Query("role") role: String? = null,  // car=私家车, truck=货车
-        @Query("type") type: String? = null
+        @Query("type") type: String? = null  // car=私家车, truck=货车
     ): Response<PoisResponse>
 
     /**
@@ -218,7 +217,6 @@ interface ApiService {
         @Query("lat") lat: Double,
         @Query("lng") lng: Double,
         @Query("radius") radius: Int = 1000,
-        @Query("role") role: String? = null,
         @Query("type") type: String? = null,
         @Query("limit") limit: Int = 20
     ): Response<PoisResponse>
@@ -366,14 +364,11 @@ interface ApiService {
     // ==================== POI列表 ====================
 
     /**
-     * 获取POI列表（分页）
+     * 获取POI列表（基础版）
      * GET /pois/list
      */
     @GET("pois/list")
     suspend fun getPoisList(
-        @Query("role") role: String? = null,
-        @Query("type") type: String? = null,
-        @Query("page") page: Int = 1,
-        @Query("page_size") pageSize: Int = 50
-    ): Response<PoisResponse>
+        @Query("poi_type") poiType: String? = null
+    ): Response<List<POI>>
 }

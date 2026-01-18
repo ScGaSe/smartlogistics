@@ -392,6 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun submitReport(
         vehicleId: Int,
         destinationPoiId: String,
+        estimatedArrivalTime: String,
         cargoType: String,
         isHazardous: Boolean,
         hazardClass: String? = null,
@@ -401,7 +402,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _reportState.value = ReportState.Loading
             when (val result = repository.submitCargoReport(
-                vehicleId, destinationPoiId, cargoType, isHazardous, hazardClass, weight, description
+                vehicleId, destinationPoiId, estimatedArrivalTime, cargoType, isHazardous, hazardClass, weight, description
             )) {
                 is NetworkResult.Success -> {
                     _reports.value = listOf(result.data) + _reports.value
@@ -417,6 +418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
 
     // ==================== 行程管理方法 (个人模式) ====================
 
@@ -599,8 +601,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchPOIs(type: String? = null) {
         viewModelScope.launch {
-            val role = if (isProfessionalMode()) "truck" else "car"
-            when (val result = repository.getPOIs(role, type)) {
+            val queryType = type ?: if (isProfessionalMode()) "truck" else "car"
+            when (val result = repository.getPOIs(queryType)) {
                 is NetworkResult.Success -> {
                     _pois.value = result.data
                 }

@@ -308,6 +308,7 @@ class Repository(private val context: Context) {
     suspend fun submitCargoReport(
         vehicleId: Int,
         destinationPoiId: String,
+        estimatedArrivalTime: String,
         cargoType: String,
         isHazardous: Boolean,
         hazardClass: String? = null,
@@ -325,6 +326,7 @@ class Repository(private val context: Context) {
             val request = SubmitReportRequest(
                 vehicleId = vehicleId,
                 destinationPoiId = destinationPoiId,
+                estimatedArrivalTime = estimatedArrivalTime,
                 cargoInfo = cargoInfo
             )
             val response = api.createReport(request)
@@ -339,6 +341,7 @@ class Repository(private val context: Context) {
             NetworkResult.Exception(e)
         }
     }
+
 
     /**
      * 解析语音报备
@@ -516,10 +519,10 @@ class Repository(private val context: Context) {
     /**
      * 获取POI列表
      */
-    suspend fun getPOIs(role: String? = null, type: String? = null): NetworkResult<List<POI>> {
+    suspend fun getPOIs(type: String? = null): NetworkResult<List<POI>> {
         return try {
-            val queryRole = role ?: if (isProfessionalMode()) "truck" else "car"
-            val response = api.getPois(queryRole, type)
+            val queryType = type ?: if (isProfessionalMode()) "truck" else "car"
+            val response = api.getPois(queryType)
             if (response.isSuccessful && response.body() != null) {
                 val pois = response.body()!!.data?.pois ?: emptyList()
                 NetworkResult.Success(pois)
@@ -538,8 +541,7 @@ class Repository(private val context: Context) {
      */
     suspend fun getNearbyPOIs(lat: Double, lng: Double, radius: Int = 1000, type: String? = null): NetworkResult<List<POI>> {
         return try {
-            val role = if (isProfessionalMode()) "truck" else "car"
-            val response = api.getNearbyPois(lat, lng, radius, role, type)
+            val response = api.getNearbyPois(lat, lng, radius, type)
             if (response.isSuccessful && response.body() != null) {
                 val pois = response.body()!!.data?.pois ?: emptyList()
                 NetworkResult.Success(pois)

@@ -2458,8 +2458,20 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     var selectedHazmatClass by remember { mutableStateOf<HazmatClass?>(null) }
     var hazardClassExpanded by remember { mutableStateOf(false) }  // 下拉菜单展开状态
     var weight by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    // POI选择（目的地）
+    val pois by viewModel?.pois?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    var selectedPoi by remember { mutableStateOf<com.example.smartlogistics.network.POI?>(null) }
+    var poiExpanded by remember { mutableStateOf(false) }
+    var poiSearchQuery by remember { mutableStateOf("") }  // POI搜索关键词
+    // 预计到达时间
+    var estimatedArrivalTime by remember {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.add(java.util.Calendar.HOUR_OF_DAY, 2)
+        mutableStateOf(calendar.time)
+    }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
     val reportState by viewModel?.reportState?.collectAsState() ?: remember { mutableStateOf(ReportState.Idle) }
     val vehicles by viewModel?.vehicles?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     var selectedVehicleId by remember { mutableStateOf(-1) }
@@ -2471,6 +2483,11 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val volumeLevel by speechHelper.volumeLevel.collectAsState()
     val partialText by speechHelper.partialText.collectAsState()
     var showVoiceDialog by remember { mutableStateOf(false) }
+
+    // 加载POI列表
+    LaunchedEffect(Unit) {
+        viewModel?.fetchPOIs()
+    }
 
     // 权限处理
     var hasRecordPermission by remember {
@@ -2508,7 +2525,10 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         isHazardous = it == "危险品"
                     }
                     parsed.weight?.let { weight = it }
-                    parsed.destination?.let { destination = it }
+                    // 目的地 - 尝试匹配POI名称
+                    parsed.destination?.let { destName ->
+                        pois.find { it.name.contains(destName) || destName.contains(it.name) }?.let { selectedPoi = it }
+                    }
                     // 危险品类别 - 从名称匹配HazmatClass对象
                     parsed.hazardClass?.let { hazardName ->
                         selectedHazmatClass = HazmatRecognitionHelper.HAZMAT_CLASSES.values.find {
@@ -2521,7 +2541,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                     val filledFields = mutableListOf<String>()
                     if (parsed.cargoType != null) filledFields.add("货物类型")
                     if (parsed.weight != null) filledFields.add("重量")
-                    if (parsed.destination != null) filledFields.add("目的地")
+                    if (parsed.destination != null && selectedPoi != null) filledFields.add("目的地")
 
                     if (filledFields.isNotEmpty()) {
                         Toast.makeText(
@@ -3107,8 +3127,165 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                 Spacer(modifier = Modifier.height(16.dp))
                 StyledTextField(value = weight, onValueChange = { weight = it }, label = "货物重量 (吨)", leadingIcon = Icons.Rounded.Scale, keyboardType = KeyboardType.Decimal)
+
+                // 目的地POI选择（带搜索筛选）
                 Spacer(modifier = Modifier.height(16.dp))
-                StyledTextField(value = destination, onValueChange = { destination = it }, label = "目的地", leadingIcon = Icons.Rounded.LocationOn)
+                Text(text = "目的地", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+                
+                // 筛选后的POI列表
+                val filteredPois = remember(pois, poiSearchQuery) {
+                    if (poiSearchQuery.isBlank()) pois
+                    else pois.filter { 
+                        it.name.contains(poiSearchQuery, ignoreCase = true) || 
+                        (it.address?.contains(poiSearchQuery, ignoreCase = true) == true)
+                    }
+                }
+                
+                ExposedDropdownMenuBox(expanded = poiExpanded, onExpandedChange = { poiExpanded = it }) {
+                    OutlinedTextField(
+                        value = selectedPoi?.name ?: "请选择目的地",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = poiExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = Color(0xFFE0E0E0),
+                            focusedBorderColor = TruckOrange
+                        )
+                    )
+                    ExposedDropdownMenu(expanded = poiExpanded, onDismissRequest = { poiExpanded = false; poiSearchQuery = "" }) {
+                        // 搜索框
+                        OutlinedTextField(
+                            value = poiSearchQuery,
+                            onValueChange = { poiSearchQuery = it },
+                            placeholder = { Text("搜索仓库/货站...", fontSize = 14.sp, color = TextTertiary) },
+                            leadingIcon = { Icon(Icons.Rounded.Search, null, tint = TextTertiary, modifier = Modifier.size(20.dp)) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedBorderColor = Color(0xFFE0E0E0),
+                                focusedBorderColor = TruckOrange
+                            )
+                        )
+                        
+                        HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 4.dp))
+                        
+                        if (filteredPois.isEmpty()) {
+                            // 无搜索结果提示
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("未找到匹配的地点", fontSize = 14.sp, color = TextTertiary)
+                            }
+                        } else {
+                            filteredPois.forEach { poi ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Column {
+                                            Text(poi.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                            poi.address?.let {
+                                                Text(it, fontSize = 12.sp, color = TextSecondary)
+                                            }
+                                        }
+                                    },
+                                    onClick = { 
+                                        selectedPoi = poi
+                                        poiExpanded = false
+                                        poiSearchQuery = ""
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Rounded.LocationOn, 
+                                            null, 
+                                            tint = TruckOrange,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 预计到达时间
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "预计到达时间", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+                val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()) }
+                val timeFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { showDatePicker = true }, 
+                        modifier = Modifier.weight(1f), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TruckOrange),
+                        border = BorderStroke(1.dp, TruckOrange.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.CalendarToday, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(dateFormat.format(estimatedArrivalTime), fontSize = 14.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { showTimePicker = true }, 
+                        modifier = Modifier.weight(1f), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TruckOrange),
+                        border = BorderStroke(1.dp, TruckOrange.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(timeFormat.format(estimatedArrivalTime), fontSize = 14.sp)
+                    }
+                }
+                if (showDatePicker) {
+                    val cal = java.util.Calendar.getInstance().apply { time = estimatedArrivalTime }
+                    // 使用橙色主题的DatePickerDialog
+                    val datePickerDialog = android.app.DatePickerDialog(
+                        android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Light_Dialog),
+                        { _, y, m, d ->
+                            val newCal = java.util.Calendar.getInstance().apply { time = estimatedArrivalTime }
+                            newCal.set(y, m, d)
+                            estimatedArrivalTime = newCal.time
+                            showDatePicker = false
+                        }, 
+                        cal.get(java.util.Calendar.YEAR), 
+                        cal.get(java.util.Calendar.MONTH), 
+                        cal.get(java.util.Calendar.DAY_OF_MONTH)
+                    )
+                    datePickerDialog.setOnCancelListener { showDatePicker = false }
+                    datePickerDialog.show()
+                    // 设置按钮颜色
+                    datePickerDialog.getButton(android.app.DatePickerDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.parseColor("#FF6B35"))
+                    datePickerDialog.getButton(android.app.DatePickerDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.parseColor("#FF6B35"))
+                }
+                if (showTimePicker) {
+                    val cal = java.util.Calendar.getInstance().apply { time = estimatedArrivalTime }
+                    // 使用橙色主题的TimePickerDialog
+                    val timePickerDialog = android.app.TimePickerDialog(
+                        android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault_Light_Dialog),
+                        { _, h, m ->
+                            val newCal = java.util.Calendar.getInstance().apply { time = estimatedArrivalTime }
+                            newCal.set(java.util.Calendar.HOUR_OF_DAY, h)
+                            newCal.set(java.util.Calendar.MINUTE, m)
+                            estimatedArrivalTime = newCal.time
+                            showTimePicker = false
+                        }, 
+                        cal.get(java.util.Calendar.HOUR_OF_DAY), 
+                        cal.get(java.util.Calendar.MINUTE), 
+                        true
+                    )
+                    timePickerDialog.setOnCancelListener { showTimePicker = false }
+                    timePickerDialog.show()
+                    // 设置按钮颜色
+                    timePickerDialog.getButton(android.app.TimePickerDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.parseColor("#FF6B35"))
+                    timePickerDialog.getButton(android.app.TimePickerDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.parseColor("#FF6B35"))
+                }
             }
         }
 
@@ -3128,18 +3305,20 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
         PrimaryButton(
             text = "提交报备",
             onClick = {
+                val isoFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
                 viewModel?.submitReport(
                     selectedVehicleId,
-                    destination,
+                    selectedPoi?.id ?: "",
+                    isoFormat.format(estimatedArrivalTime),
                     cargoType,
                     isHazardous,
-                    selectedHazmatClass?.name,  // 发送危险品中文名称
+                    selectedHazmatClass?.name,
                     weight.toDoubleOrNull(),
                     description.ifBlank { null }
                 )
             },
             isLoading = isLoading,
-            enabled = selectedVehicleId != -1 && destination.isNotBlank(),
+            enabled = selectedVehicleId != -1 && selectedPoi != null,
             backgroundColor = TruckOrange,
             icon = Icons.Rounded.Send
         )
