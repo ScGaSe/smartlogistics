@@ -1,7 +1,11 @@
 package com.example.smartlogistics.ui.screens
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -16,8 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -28,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
+import com.example.smartlogistics.utils.SettingsManager
 import java.io.File
 
 // ==================== 个人资料编辑页面 ====================
@@ -41,11 +48,51 @@ fun EditProfileScreen(
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
     
-    // 用户信息状态
-    var nickname by remember { mutableStateOf(viewModel?.getUserName() ?: "用户") }
-    var phone by remember { mutableStateOf("138****8888") }
+    // 获取设置管理器
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    
+    // 获取真实用户信息
+    val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
+    
+    // 真实手机号（脱敏显示）
+    val realPhone = userInfo?.phoneNumber ?: viewModel?.getUserName() ?: ""
+    val maskedPhone = if (realPhone.length >= 11) {
+        "${realPhone.substring(0, 3)}****${realPhone.substring(7)}"
+    } else {
+        realPhone
+    }
+    
+    // 用户信息状态 - 从本地读取昵称，默认使用手机号
+    var nickname by remember { 
+        mutableStateOf(settingsManager.getNickname() ?: realPhone) 
+    }
     var isEditing by remember { mutableStateOf(false) }
-    var showAvatarDialog by remember { mutableStateOf(false) }
+    
+    // 头像状态
+    var avatarBitmap by remember { mutableStateOf(settingsManager.getAvatarBitmap()) }
+    var avatarUpdateTrigger by remember { mutableStateOf(0) }
+    
+    // 图片选择器
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            if (settingsManager.saveAvatar(it)) {
+                avatarBitmap = settingsManager.getAvatarBitmap()
+                avatarUpdateTrigger++
+                Toast.makeText(context, "头像已更新", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "头像保存失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    // 更新昵称（当 realPhone 变化时）
+    LaunchedEffect(realPhone) {
+        if (settingsManager.getNickname() == null && realPhone.isNotEmpty()) {
+            nickname = realPhone
+        }
+    }
     
     Scaffold(
         topBar = {
@@ -60,7 +107,8 @@ fun EditProfileScreen(
                     TextButton(
                         onClick = {
                             if (isEditing) {
-                                // 保存修改
+                                // 保存昵称到本地
+                                settingsManager.saveNickname(nickname)
                                 Toast.makeText(context, "资料已保存", Toast.LENGTH_SHORT).show()
                             }
                             isEditing = !isEditing
@@ -102,15 +150,27 @@ fun EditProfileScreen(
                             .size(100.dp)
                             .clip(CircleShape)
                             .background(primaryColor.copy(alpha = 0.1f))
-                            .clickable(enabled = isEditing) { showAvatarDialog = true },
+                            .clickable(enabled = isEditing) { 
+                                imagePickerLauncher.launch("image/*")
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Person,
-                            contentDescription = null,
-                            modifier = Modifier.size(50.dp),
-                            tint = primaryColor
-                        )
+                        // 显示头像或默认图标
+                        if (avatarBitmap != null) {
+                            Image(
+                                bitmap = avatarBitmap!!.asImageBitmap(),
+                                contentDescription = "头像",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(50.dp),
+                                tint = primaryColor
+                            )
+                        }
                         
                         if (isEditing) {
                             Box(
@@ -162,20 +222,10 @@ fun EditProfileScreen(
                     
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 12.dp))
                     
-                    // 手机号（不可编辑）
+                    // 手机号（显示真实手机号，脱敏，不可编辑）
                     ProfileDisplayItem(
                         label = "手机号",
-                        value = phone,
-                        trailing = {
-                            Text(
-                                text = "去修改",
-                                fontSize = 14.sp,
-                                color = primaryColor,
-                                modifier = Modifier.clickable {
-                                    navController.navigate("account_security")
-                                }
-                            )
-                        }
+                        value = maskedPhone
                     )
                     
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 12.dp))
@@ -199,40 +249,6 @@ fun EditProfileScreen(
             )
         }
     }
-    
-    // 头像选择对话框
-    if (showAvatarDialog) {
-        AlertDialog(
-            onDismissRequest = { showAvatarDialog = false },
-            title = { Text("更换头像") },
-            text = {
-                Column {
-                    ListItem(
-                        headlineContent = { Text("拍照") },
-                        leadingContent = { Icon(Icons.Rounded.CameraAlt, null) },
-                        modifier = Modifier.clickable {
-                            Toast.makeText(context, "相机功能开发中", Toast.LENGTH_SHORT).show()
-                            showAvatarDialog = false
-                        }
-                    )
-                    ListItem(
-                        headlineContent = { Text("从相册选择") },
-                        leadingContent = { Icon(Icons.Rounded.PhotoLibrary, null) },
-                        modifier = Modifier.clickable {
-                            Toast.makeText(context, "相册功能开发中", Toast.LENGTH_SHORT).show()
-                            showAvatarDialog = false
-                        }
-                    )
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showAvatarDialog = false }) {
-                    Text("取消")
-                }
-            }
-        )
-    }
 }
 
 // ==================== 账号安全页面 ====================
@@ -245,9 +261,6 @@ fun AccountSecurityScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
-    var showChangePasswordDialog by remember { mutableStateOf(false) }
-    var showChangePhoneDialog by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -275,22 +288,12 @@ fun AccountSecurityScreen(
                 colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
                 Column {
-                    // 修改密码
+                    // 修改密码 - 跳转到独立页面
                     SecurityMenuItem(
                         icon = Icons.Rounded.Lock,
                         title = "修改密码",
                         subtitle = "定期修改密码更安全",
-                        onClick = { showChangePasswordDialog = true }
-                    )
-                    
-                    HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
-                    // 修改手机号
-                    SecurityMenuItem(
-                        icon = Icons.Rounded.PhoneAndroid,
-                        title = "更换手机号",
-                        subtitle = "当前: 138****8888",
-                        onClick = { showChangePhoneDialog = true }
+                        onClick = { navController.navigate("change_password") }
                     )
                     
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
@@ -324,30 +327,6 @@ fun AccountSecurityScreen(
                 )
             }
         }
-    }
-    
-    // 修改密码对话框
-    if (showChangePasswordDialog) {
-        ChangePasswordDialog(
-            onDismiss = { showChangePasswordDialog = false },
-            onConfirm = { old, new ->
-                Toast.makeText(context, "密码修改成功", Toast.LENGTH_SHORT).show()
-                showChangePasswordDialog = false
-            },
-            primaryColor = primaryColor
-        )
-    }
-    
-    // 修改手机号对话框
-    if (showChangePhoneDialog) {
-        ChangePhoneDialog(
-            onDismiss = { showChangePhoneDialog = false },
-            onConfirm = { phone, code ->
-                Toast.makeText(context, "手机号修改成功", Toast.LENGTH_SHORT).show()
-                showChangePhoneDialog = false
-            },
-            primaryColor = primaryColor
-        )
     }
 }
 
@@ -509,8 +488,7 @@ fun HelpCenterScreen(
                 FAQ("如何进行货物报备？", "进入主页 > 点击「货物报备」> 填写货物信息或使用语音输入 > 提交报备"),
                 FAQ("如何规划路线？", "进入导航页面 > 输入目的地 > 系统会自动规划符合货车限制的路线"),
                 FAQ("如何查看拥堵预测？", "进入主页 > 点击「拥堵预测」> 可查看未来3小时内的路况趋势"),
-                FAQ("危化品车辆有什么限制？", "危化品车辆必须从指定闸口进入，系统会自动规划专用路线"),
-                FAQ("如何联系客服？", "点击下方「在线客服」按钮，或拨打客服热线：400-123-4567")
+                FAQ("危化品车辆有什么限制？", "危化品车辆必须从指定闸口进入，系统会自动规划专用路线")
             )
         } else {
             listOf(
@@ -518,8 +496,7 @@ fun HelpCenterScreen(
                 FAQ("如何关联航班/火车？", "进入「我的行程」> 点击添加 > 输入航班号或车次 > 系统自动获取行程信息"),
                 FAQ("如何使用寻车功能？", "停车时先标记位置或拍照 > 需要找车时点击「导航找车」"),
                 FAQ("如何查看停车场空位？", "进入导航页面 > 点击停车场图标 > 可查看实时空位数量"),
-                FAQ("如何分享实时位置？", "在行程详情中 > 点击「位置共享」> 生成分享链接发送给接机人"),
-                FAQ("如何联系客服？", "点击下方「在线客服」按钮，或拨打客服热线：400-123-4567")
+                FAQ("如何分享实时位置？", "在行程详情中 > 点击「位置共享」> 生成分享链接发送给接机人")
             )
         }
     }
@@ -544,64 +521,27 @@ fun HelpCenterScreen(
                 .fillMaxSize()
                 .background(BackgroundPrimary)
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // FAQ列表
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "常见问题",
-                    fontSize = 14.sp,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                )
-                
-                faqList.forEachIndexed { index, faq ->
-                    FAQItem(
-                        question = faq.question,
-                        answer = faq.answer,
-                        isExpanded = expandedIndex == index,
-                        onClick = {
-                            expandedIndex = if (expandedIndex == index) -1 else index
-                        },
-                        primaryColor = primaryColor
-                    )
-                }
-            }
+            Text(
+                text = "常见问题",
+                fontSize = 14.sp,
+                color = TextSecondary,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            )
             
-            // 底部客服按钮
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(16.dp)
-            ) {
-                Button(
+            faqList.forEachIndexed { index, faq ->
+                FAQItem(
+                    question = faq.question,
+                    answer = faq.answer,
+                    isExpanded = expandedIndex == index,
                     onClick = {
-                        // TODO: 打开客服对话
+                        expandedIndex = if (expandedIndex == index) -1 else index
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Headset,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "在线客服",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                    primaryColor = primaryColor
+                )
             }
         }
     }
@@ -737,7 +677,7 @@ fun AboutScreen(
             
             // 版权信息
             Text(
-                text = "© 2025 HubLink Navigator\n智慧枢纽导航系统",
+                text = "© 2026 HubLink Navigator\n智慧枢纽导航系统",
                 fontSize = 12.sp,
                 color = TextTertiary,
                 textAlign = TextAlign.Center,
@@ -1231,100 +1171,41 @@ private fun AboutMenuItem(
     }
 }
 
-// ==================== 对话框组件 ====================
-
+// ==================== 修改密码页面 ====================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChangePasswordDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (old: String, new: String) -> Unit,
-    primaryColor: Color
+fun ChangePasswordScreen(
+    navController: NavController,
+    viewModel: MainViewModel? = null
 ) {
-    var oldPassword by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val isProfessional = viewModel?.isProfessionalMode() ?: false
+    val primaryColor = if (isProfessional) TruckOrange else CarGreen
+    
+    // 获取真实手机号
+    val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
+    val phoneNumber = userInfo?.phoneNumber ?: viewModel?.getUserName() ?: ""
+    
+    // 脱敏手机号
+    val maskedPhone = if (phoneNumber.length >= 11) {
+        "${phoneNumber.substring(0, 3)}****${phoneNumber.substring(7)}"
+    } else {
+        phoneNumber
+    }
+    
+    // 表单状态
+    var verifyCode by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
-    var showOld by remember { mutableStateOf(false) }
-    var showNew by remember { mutableStateOf(false) }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("修改密码") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = oldPassword,
-                    onValueChange = { oldPassword = it },
-                    label = { Text("当前密码") },
-                    singleLine = true,
-                    visualTransformation = if (showOld) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showOld = !showOld }) {
-                            Icon(
-                                imageVector = if (showOld) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                contentDescription = null
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                OutlinedTextField(
-                    value = newPassword,
-                    onValueChange = { newPassword = it },
-                    label = { Text("新密码") },
-                    singleLine = true,
-                    visualTransformation = if (showNew) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showNew = !showNew }) {
-                            Icon(
-                                imageVector = if (showNew) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                contentDescription = null
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = { Text("确认新密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (newPassword == confirmPassword) {
-                        onConfirm(oldPassword, newPassword)
-                    }
-                },
-                enabled = oldPassword.isNotEmpty() && newPassword.isNotEmpty() && newPassword == confirmPassword
-            ) {
-                Text("确认", color = primaryColor)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-@Composable
-private fun ChangePhoneDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (phone: String, code: String) -> Unit,
-    primaryColor: Color
-) {
-    var newPhone by remember { mutableStateOf("") }
-    var verifyCode by remember { mutableStateOf("") }
     var countdown by remember { mutableStateOf(0) }
-    val context = LocalContext.current
+    var showError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
     
+    // 监听认证状态
+    val authState by viewModel?.authState?.collectAsState() ?: remember { mutableStateOf(null) }
+    val isLoading = authState is com.example.smartlogistics.viewmodel.AuthState.Loading
+    
+    // 倒计时
     LaunchedEffect(countdown) {
         if (countdown > 0) {
             kotlinx.coroutines.delay(1000)
@@ -1332,56 +1213,329 @@ private fun ChangePhoneDialog(
         }
     }
     
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("更换手机号") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = newPhone,
-                    onValueChange = { newPhone = it },
-                    label = { Text("新手机号") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+    // 处理状态变化
+    LaunchedEffect(authState) {
+        when (authState) {
+            is com.example.smartlogistics.viewmodel.AuthState.CodeSent -> {
+                countdown = 60
+                Toast.makeText(context, "验证码已发送", Toast.LENGTH_SHORT).show()
+            }
+            is com.example.smartlogistics.viewmodel.AuthState.ResetPasswordSuccess -> {
+                Toast.makeText(context, "密码修改成功，请重新登录", Toast.LENGTH_LONG).show()
+                viewModel?.resetAuthState()
+                viewModel?.logout()
+                navController.navigate("login") {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+            is com.example.smartlogistics.viewmodel.AuthState.Error -> {
+                showError = true
+                errorMessage = (authState as com.example.smartlogistics.viewmodel.AuthState.Error).message
+            }
+            else -> {}
+        }
+    }
+    
+    // 离开页面时重置状态
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel?.resetAuthState()
+        }
+    }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("修改密码", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = { 
+                        viewModel?.resetAuthState()
+                        navController.popBackStack() 
+                    }) {
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BackgroundPrimary)
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp)
+        ) {
+            // 顶部图标
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(primaryColor.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    OutlinedTextField(
-                        value = verifyCode,
-                        onValueChange = { verifyCode = it },
-                        label = { Text("验证码") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                    Icon(
+                        imageVector = Icons.Rounded.Lock,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(40.dp)
                     )
-                    
-                    Button(
+                }
+            }
+            
+            // 手机号提示
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = primaryColor.copy(alpha = 0.1f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "验证码将发送至 $maskedPhone",
+                        fontSize = 14.sp,
+                        color = TextPrimary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // 验证码输入
+            Text(
+                text = "验证码",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            OutlinedTextField(
+                value = verifyCode,
+                onValueChange = { 
+                    if (it.length <= 6 && it.all { c -> c.isDigit() }) {
+                        verifyCode = it
+                        showError = false
+                    }
+                },
+                placeholder = { Text("请输入6位验证码") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = BorderLight,
+                    cursorColor = primaryColor
+                ),
+                trailingIcon = {
+                    TextButton(
                         onClick = {
-                            countdown = 60
-                            Toast.makeText(context, "验证码已发送", Toast.LENGTH_SHORT).show()
+                            if (phoneNumber.isNotEmpty()) {
+                                viewModel?.sendVerificationCode(phoneNumber)
+                            }
                         },
-                        enabled = countdown == 0 && newPhone.length == 11,
-                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                        enabled = countdown == 0 && !isLoading
                     ) {
-                        Text(if (countdown > 0) "${countdown}s" else "获取")
+                        Text(
+                            text = if (countdown > 0) "${countdown}s 后重发" else "获取验证码",
+                            color = if (countdown == 0 && !isLoading) primaryColor else TextTertiary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            // 新密码
+            Text(
+                text = "新密码",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            var showNewPassword by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = newPassword,
+                onValueChange = { 
+                    newPassword = it
+                    showError = false
+                },
+                placeholder = { Text("请输入新密码（至少8位）") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                visualTransformation = if (showNewPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = BorderLight,
+                    cursorColor = primaryColor
+                ),
+                trailingIcon = {
+                    IconButton(onClick = { showNewPassword = !showNewPassword }) {
+                        Icon(
+                            imageVector = if (showNewPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = null,
+                            tint = TextTertiary
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            // 确认密码
+            Text(
+                text = "确认密码",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            var showConfirmPassword by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = confirmPassword,
+                onValueChange = { 
+                    confirmPassword = it
+                    showError = false
+                },
+                placeholder = { Text("请再次输入新密码") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                visualTransformation = if (showConfirmPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                isError = confirmPassword.isNotEmpty() && newPassword != confirmPassword,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = BorderLight,
+                    cursorColor = primaryColor,
+                    errorBorderColor = ErrorRed
+                ),
+                trailingIcon = {
+                    IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
+                        Icon(
+                            imageVector = if (showConfirmPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = null,
+                            tint = TextTertiary
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            // 密码不一致提示
+            if (confirmPassword.isNotEmpty() && newPassword != confirmPassword) {
+                Text(
+                    text = "两次输入的密码不一致",
+                    color = ErrorRed,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            
+            // 错误提示
+            AnimatedVisibility(visible = showError) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = ErrorRedLight),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Error,
+                            contentDescription = null,
+                            tint = ErrorRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = errorMessage,
+                            color = ErrorRed,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(newPhone, verifyCode) },
-                enabled = newPhone.length == 11 && verifyCode.length >= 4
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // 确认修改按钮
+            Button(
+                onClick = {
+                    when {
+                        verifyCode.length != 6 -> {
+                            showError = true
+                            errorMessage = "请输入6位验证码"
+                        }
+                        newPassword.length < 8 -> {
+                            showError = true
+                            errorMessage = "密码长度至少8位"
+                        }
+                        newPassword != confirmPassword -> {
+                            showError = true
+                            errorMessage = "两次输入的密码不一致"
+                        }
+                        else -> {
+                            viewModel?.resetPassword(phoneNumber, verifyCode, newPassword)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                enabled = !isLoading
             ) {
-                Text("确认", color = primaryColor)
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = "确认修改",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // 提示信息
+            Text(
+                text = "修改密码后需要重新登录",
+                fontSize = 12.sp,
+                color = TextTertiary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
-    )
+    }
 }

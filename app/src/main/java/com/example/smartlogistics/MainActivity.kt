@@ -415,6 +415,13 @@ fun MainAppEntry(viewModel: MainViewModel) {
                 )
             }
 
+            composable("change_password") {
+                ChangePasswordScreen(
+                    navController = navController,
+                    viewModel = viewModel
+                )
+            }
+
             composable("notification_settings") {
                 NotificationSettingsScreen(
                     navController = navController,

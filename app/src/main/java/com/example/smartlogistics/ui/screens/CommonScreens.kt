@@ -1,6 +1,8 @@
 package com.example.smartlogistics.ui.screens
 
 import android.Manifest
+import android.content.Intent
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +38,7 @@ import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.AIState
 import com.example.smartlogistics.viewmodel.MainViewModel
+import com.example.smartlogistics.utils.SettingsManager
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.model.*
@@ -1229,9 +1234,22 @@ fun UserProfileScreen(
     navController: NavController,
     viewModel: MainViewModel? = null
 ) {
+    val context = LocalContext.current
     val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
+    
+    // 获取设置管理器
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    
+    // 获取本地头像
+    val avatarBitmap = remember(settingsManager.getAvatarPath()) { 
+        settingsManager.getAvatarBitmap() 
+    }
+    
+    // 获取昵称：优先本地昵称，否则用手机号
+    val realPhone = userInfo?.phoneNumber ?: viewModel?.getUserName() ?: ""
+    val displayName = settingsManager.getNickname() ?: realPhone
 
     Column(
         modifier = Modifier
@@ -1275,22 +1293,32 @@ fun UserProfileScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(BackgroundSecondary, CircleShape),
+                            .clip(CircleShape)
+                            .background(BackgroundSecondary),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Person,
-                            contentDescription = null,
-                            tint = primaryColor,
-                            modifier = Modifier.size(48.dp)
-                        )
+                        if (avatarBitmap != null) {
+                            Image(
+                                bitmap = avatarBitmap.asImageBitmap(),
+                                contentDescription = "头像",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                tint = primaryColor,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = userInfo?.nickname ?: viewModel?.getUserName() ?: "用户",
+                    text = displayName,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -1344,7 +1372,7 @@ fun UserProfileScreen(
             ProfileMenuItem(
                 icon = Icons.Rounded.Security,
                 title = "账号安全",
-                subtitle = "密码、手机号",
+                subtitle = "修改密码",
                 onClick = { navController.navigate("account_security") }
             )
 
@@ -1457,13 +1485,24 @@ fun SettingsScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
+    
+    // 获取设置管理器
+    val settingsManager = remember { SettingsManager.getInstance(context) }
 
-    var darkMode by remember { mutableStateOf(false) }
-    var autoUpdate by remember { mutableStateOf(true) }
-    var locationService by remember { mutableStateOf(true) }
+    // 自动更新设置（从本地读取）
+    var autoUpdate by remember { mutableStateOf(settingsManager.autoUpdate) }
+    
+    // 检查系统位置权限状态
+    var locationPermissionGranted by remember { 
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) 
+    }
 
-    // 缓存大小状态
-    var cacheSize by remember { mutableStateOf("128MB") }
+    // 计算真实缓存大小
+    var cacheSize by remember { mutableStateOf(settingsManager.getCacheSize()) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showSwitchAccountDialog by remember { mutableStateOf(false) }
 
@@ -1482,40 +1521,74 @@ fun SettingsScreen(
 
         SettingsCard {
             SettingsToggleItem(
-                icon = Icons.Rounded.DarkMode,
-                title = "深色模式",
-                subtitle = "夜间使用更护眼",
-                checked = darkMode,
-                onCheckedChange = {
-                    darkMode = it
-                    Toast.makeText(context, if (it) "深色模式已开启" else "深色模式已关闭", Toast.LENGTH_SHORT).show()
-                }
-            )
-
-            HorizontalDivider(color = DividerColor)
-
-            SettingsToggleItem(
                 icon = Icons.Rounded.Update,
                 title = "自动更新",
                 subtitle = "WiFi下自动更新应用",
                 checked = autoUpdate,
-                onCheckedChange = { autoUpdate = it }
+                onCheckedChange = { 
+                    autoUpdate = it
+                    settingsManager.autoUpdate = it  // 保存到本地
+                }
             )
 
             HorizontalDivider(color = DividerColor)
 
-            SettingsToggleItem(
-                icon = Icons.Rounded.LocationOn,
-                title = "位置服务",
-                subtitle = "允许获取位置信息",
-                checked = locationService,
-                onCheckedChange = {
-                    locationService = it
-                    if (!it) {
-                        Toast.makeText(context, "关闭位置服务将影响导航功能", Toast.LENGTH_SHORT).show()
+            // 位置服务 - 点击跳转到系统设置
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        // 跳转到系统应用设置页面
+                        try {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.fromParts("package", context.packageName, null)
+                            }
+                            context.startActivity(intent)
+                            Toast.makeText(context, "请在「权限」中修改位置权限", Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "无法打开设置", Toast.LENGTH_SHORT).show()
+                        }
                     }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(primaryColor.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LocationOn,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-            )
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "位置服务",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = if (locationPermissionGranted) "已授权" else "未授权，点击前往设置",
+                        fontSize = 13.sp,
+                        color = if (locationPermissionGranted) SuccessGreen else TextTertiary
+                    )
+                }
+                
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = TextTertiary
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -1619,12 +1692,11 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // 清除缓存逻辑
-                        try {
-                            context.cacheDir.deleteRecursively()
-                            cacheSize = "0MB"
+                        // 使用 SettingsManager 清除缓存
+                        if (settingsManager.clearCache()) {
+                            cacheSize = settingsManager.getCacheSize()
                             Toast.makeText(context, "缓存已清除", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) {
+                        } else {
                             Toast.makeText(context, "清除失败，请重试", Toast.LENGTH_SHORT).show()
                         }
                         showClearCacheDialog = false
