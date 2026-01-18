@@ -1211,20 +1211,12 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         modifier = Modifier.fillMaxSize(),
                         showTraffic = true,
                         showMyLocation = true,
+                        autoLocateOnStart = true,  // 首次定位自动移动到当前位置
                         onMapReady = { map ->
                             aMapInstance = map
                         },
                         onLocationChanged = { location ->
                             currentLocation = location
-                            // 首次定位移动到当前位置
-                            if (currentLocation == null) {
-                                aMapInstance?.animateCamera(
-                                    CameraUpdateFactory.newLatLngZoom(
-                                        LatLng(location.latitude, location.longitude),
-                                        15f
-                                    )
-                                )
-                            }
                         }
                     )
 
@@ -3131,16 +3123,16 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                 // 目的地POI选择（带搜索筛选）
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(text = "目的地", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
-                
+
                 // 筛选后的POI列表
                 val filteredPois = remember(pois, poiSearchQuery) {
                     if (poiSearchQuery.isBlank()) pois
-                    else pois.filter { 
-                        it.name.contains(poiSearchQuery, ignoreCase = true) || 
-                        (it.address?.contains(poiSearchQuery, ignoreCase = true) == true)
+                    else pois.filter {
+                        it.name.contains(poiSearchQuery, ignoreCase = true) ||
+                                (it.address?.contains(poiSearchQuery, ignoreCase = true) == true)
                     }
                 }
-                
+
                 ExposedDropdownMenuBox(expanded = poiExpanded, onExpandedChange = { poiExpanded = it }) {
                     OutlinedTextField(
                         value = selectedPoi?.name ?: "请选择目的地",
@@ -3171,9 +3163,9 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                 focusedBorderColor = TruckOrange
                             )
                         )
-                        
+
                         HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 4.dp))
-                        
+
                         if (filteredPois.isEmpty()) {
                             // 无搜索结果提示
                             Box(
@@ -3187,7 +3179,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         } else {
                             filteredPois.forEach { poi ->
                                 DropdownMenuItem(
-                                    text = { 
+                                    text = {
                                         Column {
                                             Text(poi.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                                             poi.address?.let {
@@ -3195,15 +3187,15 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                             }
                                         }
                                     },
-                                    onClick = { 
+                                    onClick = {
                                         selectedPoi = poi
                                         poiExpanded = false
                                         poiSearchQuery = ""
                                     },
                                     leadingIcon = {
                                         Icon(
-                                            Icons.Rounded.LocationOn, 
-                                            null, 
+                                            Icons.Rounded.LocationOn,
+                                            null,
                                             tint = TruckOrange,
                                             modifier = Modifier.size(20.dp)
                                         )
@@ -3221,8 +3213,8 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                 val timeFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(
-                        onClick = { showDatePicker = true }, 
-                        modifier = Modifier.weight(1f), 
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TruckOrange),
                         border = BorderStroke(1.dp, TruckOrange.copy(alpha = 0.5f))
@@ -3232,8 +3224,8 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         Text(dateFormat.format(estimatedArrivalTime), fontSize = 14.sp)
                     }
                     OutlinedButton(
-                        onClick = { showTimePicker = true }, 
-                        modifier = Modifier.weight(1f), 
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TruckOrange),
                         border = BorderStroke(1.dp, TruckOrange.copy(alpha = 0.5f))
@@ -3253,9 +3245,9 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                             newCal.set(y, m, d)
                             estimatedArrivalTime = newCal.time
                             showDatePicker = false
-                        }, 
-                        cal.get(java.util.Calendar.YEAR), 
-                        cal.get(java.util.Calendar.MONTH), 
+                        },
+                        cal.get(java.util.Calendar.YEAR),
+                        cal.get(java.util.Calendar.MONTH),
                         cal.get(java.util.Calendar.DAY_OF_MONTH)
                     )
                     datePickerDialog.setOnCancelListener { showDatePicker = false }
@@ -3275,9 +3267,9 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                             newCal.set(java.util.Calendar.MINUTE, m)
                             estimatedArrivalTime = newCal.time
                             showTimePicker = false
-                        }, 
-                        cal.get(java.util.Calendar.HOUR_OF_DAY), 
-                        cal.get(java.util.Calendar.MINUTE), 
+                        },
+                        cal.get(java.util.Calendar.HOUR_OF_DAY),
+                        cal.get(java.util.Calendar.MINUTE),
                         true
                     )
                     timePickerDialog.setOnCancelListener { showTimePicker = false }

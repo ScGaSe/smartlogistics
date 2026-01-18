@@ -1873,20 +1873,12 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         modifier = Modifier.fillMaxSize(),
                         showTraffic = true,
                         showMyLocation = true,
+                        autoLocateOnStart = true,  // 首次定位自动移动到当前位置
                         onMapReady = { map ->
                             aMapInstance = map
                         },
                         onLocationChanged = { location ->
                             currentLocation = location
-                            // 首次定位移动到当前位置
-                            if (currentLocation == null) {
-                                aMapInstance?.animateCamera(
-                                    CameraUpdateFactory.newLatLngZoom(
-                                        LatLng(location.latitude, location.longitude),
-                                        15f
-                                    )
-                                )
-                            }
                         }
                     )
 

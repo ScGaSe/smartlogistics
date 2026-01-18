@@ -32,7 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.smartlogistics.ui.components.*
@@ -1716,61 +1715,30 @@ fun SettingsScreen(
 
     // 切换账号对话框
     if (showSwitchAccountDialog) {
-        Dialog(onDismissRequest = { showSwitchAccountDialog = false }) {
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // 图标
-                    Icon(
-                        Icons.Rounded.SwapHoriz,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(32.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // 标题
-                    Text("切换账号", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 内容
-                    Text(
-                        "切换账号将退出当前账号，确定要继续吗？",
-                        fontSize = 14.sp,
-                        color = Color.Gray,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // 按钮区域 - 居中排列
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,  // ← 关键：居中对齐
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(onClick = { showSwitchAccountDialog = false }) {
-                            Text("取消", fontSize = 15.sp)
-                        }
-
-                        Spacer(modifier = Modifier.width(32.dp))
-
-                        TextButton(onClick = { /* 切换逻辑 */ }) {
-                            Text("确定切换", color = primaryColor, fontSize = 15.sp)
+        AlertDialog(
+            onDismissRequest = { showSwitchAccountDialog = false },
+            icon = { Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = primaryColor) },
+            title = { Text("切换账号") },
+            text = { Text("切换账号将退出当前账号，确定要继续吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSwitchAccountDialog = false
+                        viewModel?.logout()
+                        navController.navigate("login") {
+                            popUpTo(0) { inclusive = true }
                         }
                     }
+                ) {
+                    Text("确定切换", color = primaryColor)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSwitchAccountDialog = false }) {
+                    Text("取消")
                 }
             }
-        }
+        )
     }
 }
 
