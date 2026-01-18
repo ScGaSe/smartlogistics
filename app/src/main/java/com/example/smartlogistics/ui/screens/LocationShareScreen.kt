@@ -229,7 +229,8 @@ fun LocationShareScreen(
             }
             "view" -> {
                 // 查看共享模式：获取共享详情并连接WebSocket
-                shareId?.let { id ->
+                // 统一转小写，确保与发起者在同一channel
+                shareId?.lowercase()?.let { id ->
                     isLoading = true
                     when (val result = repository.getLocationShareDetail(id)) {
                         is NetworkResult.Success -> {
