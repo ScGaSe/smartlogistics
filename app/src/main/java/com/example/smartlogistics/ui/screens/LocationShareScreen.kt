@@ -84,6 +84,9 @@ fun LocationShareScreen(
     // 停止共享确认对话框
     var showStopDialog by remember { mutableStateOf(false) }
 
+    // 分享已结束提示对话框（查看方）
+    var showShareEndedDialog by remember { mutableStateOf(false) }
+
     // 地图相关
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
@@ -284,6 +287,25 @@ fun LocationShareScreen(
         }
     }
 
+    // ✅ 新增：查看模式下监听WebSocket断开，提示分享已结束
+    LaunchedEffect(mode) {
+        if (mode == "view") {
+            val wsManager = if (Repository.USE_LOCAL_MOCK) null else realWebSocketManager
+            wsManager?.connectionState?.collect { state ->
+                when (state) {
+                    is WebSocketManager.ConnectionState.Disconnected,
+                    is WebSocketManager.ConnectionState.Error -> {
+                        // 如果之前已经连接成功过（有收到过位置），说明是对方停止了共享
+                        if (otherLocation != null || lastUpdateTime != null) {
+                            showShareEndedDialog = true
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
     // ==================== UI ====================
     Scaffold(
         topBar = {
@@ -457,23 +479,7 @@ fun LocationShareScreen(
                         shareDetail = shareDetail!!,
                         otherLocation = otherLocation,
                         myLocation = myLocation,
-                        lastUpdateTime = lastUpdateTime,
-                        onNavigate = {
-                            // 调用高德导航
-                            otherLocation?.let { dest ->
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setPackage("com.autonavi.minimap")
-                                    data = android.net.Uri.parse(
-                                        "amapuri://route/plan/?dlat=${dest.latitude}&dlon=${dest.longitude}&dname=对方位置&dev=0&t=0"
-                                    )
-                                }
-                                try {
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "请安装高德地图", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
+                        lastUpdateTime = lastUpdateTime
                     )
                 }
             }
@@ -507,6 +513,48 @@ fun LocationShareScreen(
             dismissButton = {
                 TextButton(onClick = { showStopDialog = false }) {
                     Text("继续共享", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // 分享已结束提示对话框（查看方）
+    if (showShareEndedDialog) {
+        AlertDialog(
+            onDismissRequest = { },  // 不允许点击外部关闭
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Cancel,
+                    contentDescription = null,
+                    tint = Color(0xFFE53935),
+                    modifier = Modifier.size(48.dp)
+                )
+            },
+            title = {
+                Text(
+                    "位置共享已结束",
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Text(
+                    "对方已停止共享位置",
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showShareEndedDialog = false
+                        navController.popBackStack()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = CarGreen)
+                ) {
+                    Text("我知道了")
                 }
             }
         )
@@ -662,8 +710,7 @@ private fun ViewModeCard(
     shareDetail: LocationShareDetail,
     otherLocation: LatLng?,
     myLocation: LatLng?,
-    lastUpdateTime: String?,
-    onNavigate: () -> Unit
+    lastUpdateTime: String?
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -807,20 +854,6 @@ private fun ViewModeCard(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            // 导航按钮
-            Button(
-                onClick = onNavigate,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = otherLocation != null,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CarGreen)
-            ) {
-                Icon(Icons.Rounded.Navigation, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("导航前往")
             }
         }
     }
