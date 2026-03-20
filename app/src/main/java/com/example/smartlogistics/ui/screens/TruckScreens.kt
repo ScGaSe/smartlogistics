@@ -802,6 +802,33 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
 fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = null) {
     var destination by remember { mutableStateOf("") }
 
+    // ★ 从后端加载货运仓库列表，只展示指定3个常用目的地
+    val QUICK_DEST_NAMES = listOf(
+        "大兴南航国际货站",
+        "大兴国际机场BCS国际货运站",
+        "中国航油北京公司航空供油部"
+    )
+    // 航油供油部后端暂无数据，使用真实坐标兜底
+    val FALLBACK_DESTS = listOf(
+        Triple("大兴南航国际货站",          "warehouse_814584221", Pair(39.52038,  116.447661)),
+        Triple("大兴国际机场BCS国际货运站", "warehouse_814584222", Pair(39.520507, 116.450195)),
+        Triple("中国航油北京公司航空供油部", "warehouse_avfuel",   Pair(39.519800, 116.453000))
+    )
+    var warehouseMap by remember { mutableStateOf<Map<String, com.example.smartlogistics.network.WarehouseItem>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        try {
+            val resp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getWarehouses()
+            }
+            if (resp.isSuccessful && !resp.body()?.warehouses.isNullOrEmpty()) {
+                warehouseMap = resp.body()!!.warehouses!!.associateBy { it.name }
+                android.util.Log.d("TruckRoute", "仓库数据已加载，共${warehouseMap.size}个")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TruckRoute", "加载仓库数据失败: ${e.message}")
+        }
+    }
+
     DetailScreenTemplate(navController = navController, title = "路线规划", backgroundColor = BackgroundPrimary) {
         // 路线输入卡片
         Card(
@@ -895,35 +922,32 @@ fun TruckRouteScreen(navController: NavController, viewModel: MainViewModel? = n
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 常用目的地列表
+        // 常用目的地列表（从后端加载，兜底用硬编码坐标）
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TruckQuickDestinationItem(
-                icon = Icons.Rounded.Warehouse,
-                title = "1号仓库",
-                subtitle = "北京市朝阳区物流园区",
-                onClick = {
-                    val encodedDest = Uri.encode("北京市朝阳区物流园区 1号仓库")
-                    navController.navigate("navigation_map?destination=$encodedDest")
+            FALLBACK_DESTS.forEach { (name, _, coordPair) ->
+                val warehouse = warehouseMap[name]
+                val lat = warehouse?.lat ?: coordPair.first
+                val lng = warehouse?.lng ?: coordPair.second
+                val icon = when (name) {
+                    "大兴南航国际货站"            -> Icons.Rounded.Warehouse
+                    "大兴国际机场BCS国际货运站"   -> Icons.Rounded.LocalShipping
+                    else                          -> Icons.Rounded.Factory
                 }
-            )
-            TruckQuickDestinationItem(
-                icon = Icons.Rounded.LocalShipping,
-                title = "3号货站",
-                subtitle = "北京市大兴区货运中心",
-                onClick = {
-                    val encodedDest = Uri.encode("北京市大兴区货运中心 3号货站")
-                    navController.navigate("navigation_map?destination=$encodedDest")
+                val subtitle = when (name) {
+                    "大兴南航国际货站"            -> "大兴机场货运区东区"
+                    "大兴国际机场BCS国际货运站"   -> "大兴机场货运区东区"
+                    else                          -> "大兴机场货运区"
                 }
-            )
-            TruckQuickDestinationItem(
-                icon = Icons.Rounded.Factory,
-                title = "集装箱堆场",
-                subtitle = "天津港保税区",
-                onClick = {
-                    val encodedDest = Uri.encode("天津港保税区 集装箱堆场")
-                    navController.navigate("navigation_map?destination=$encodedDest")
-                }
-            )
+                TruckQuickDestinationItem(
+                    icon = icon,
+                    title = name,
+                    subtitle = subtitle,
+                    onClick = {
+                        val encodedDest = Uri.encode("DIRECT:::$name:::$lat:::$lng")
+                        navController.navigate("navigation_map?destination=$encodedDest")
+                    }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -2748,7 +2772,6 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val pois by viewModel?.pois?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     var selectedPoi by remember { mutableStateOf<com.example.smartlogistics.network.POI?>(null) }
     var poiExpanded by remember { mutableStateOf(false) }
-    var poiSearchQuery by remember { mutableStateOf("") }  // POI搜索关键词
     // 预计到达时间
     var estimatedArrivalTime by remember {
         val calendar = java.util.Calendar.getInstance()
@@ -2769,9 +2792,36 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
     val partialText by speechHelper.partialText.collectAsState()
     var showVoiceDialog by remember { mutableStateOf(false) }
 
-    // 加载POI列表
+    // 目的地列表：硬编码7个货运仓库为默认值，接口成功时用真实数据覆盖
+    val defaultWarehousePois = remember {
+        listOf(
+            com.example.smartlogistics.network.POI("warehouse_814584217", "BCS国内货运营业厅",           39.521978, 116.433660, "industrial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_814584219", "中国南航北京分公司货物",      39.522369, 116.435694, "industrial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_814584220", "东航物流",                    39.521154, 116.443440, "industrial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_814584221", "大兴南航国际货站",            39.520380, 116.447661, "industrial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_814584222", "大兴国际机场BCS国际货运站",   39.520507, 116.450195, "industrial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_814584223", "北京大兴国际机场海关货运综合楼", 39.525124, 116.451206, "commercial", address = "大兴机场货运区"),
+            com.example.smartlogistics.network.POI("warehouse_10012544018", "机场货运区",               39.525820, 116.451098, "industrial", address = "大兴机场货运区")
+        )
+    }
+    var warehousePois by remember { mutableStateOf<List<com.example.smartlogistics.network.POI>>(defaultWarehousePois) }
     LaunchedEffect(Unit) {
-        viewModel?.fetchPOIs()
+        try {
+            val resp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getWarehouses()
+            }
+            if (resp.isSuccessful && !resp.body()?.warehouses.isNullOrEmpty()) {
+                warehousePois = resp.body()!!.warehouses!!.map { w ->
+                    com.example.smartlogistics.network.POI(
+                        id = w.id, name = w.name, lat = w.lat, lng = w.lng,
+                        type = w.type, address = "大兴机场货运区"
+                    )
+                }
+                android.util.Log.d("CargoReport", "货运仓库已从接口更新，共${warehousePois.size}个")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("CargoReport", "接口失败，使用默认仓库数据: ${e.message}")
+        }
     }
 
     // 权限处理
@@ -3445,18 +3495,9 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                 Spacer(modifier = Modifier.height(16.dp))
                 StyledTextField(value = weight, onValueChange = { weight = it }, label = "货物重量 (吨)", leadingIcon = Icons.Rounded.Scale, keyboardType = KeyboardType.Decimal)
 
-                // 目的地POI选择（带搜索筛选）
+                // 目的地选择（直接滚动显示全部7个货运仓库，无搜索框）
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(text = "目的地", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
-
-                // 筛选后的POI列表
-                val filteredPois = remember(pois, poiSearchQuery) {
-                    if (poiSearchQuery.isBlank()) pois
-                    else pois.filter {
-                        it.name.contains(poiSearchQuery, ignoreCase = true) ||
-                                (it.address?.contains(poiSearchQuery, ignoreCase = true) == true)
-                    }
-                }
 
                 ExposedDropdownMenuBox(expanded = poiExpanded, onExpandedChange = { poiExpanded = it }) {
                     OutlinedTextField(
@@ -3471,62 +3512,33 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                             focusedBorderColor = TruckOrange
                         )
                     )
-                    ExposedDropdownMenu(expanded = poiExpanded, onDismissRequest = { poiExpanded = false; poiSearchQuery = "" }) {
-                        // 搜索框
-                        OutlinedTextField(
-                            value = poiSearchQuery,
-                            onValueChange = { poiSearchQuery = it },
-                            placeholder = { Text("搜索仓库/货站...", fontSize = 14.sp, color = TextTertiary) },
-                            leadingIcon = { Icon(Icons.Rounded.Search, null, tint = TextTertiary, modifier = Modifier.size(20.dp)) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedBorderColor = Color(0xFFE0E0E0),
-                                focusedBorderColor = TruckOrange
-                            )
-                        )
-
-                        HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 4.dp))
-
-                        if (filteredPois.isEmpty()) {
-                            // 无搜索结果提示
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("未找到匹配的地点", fontSize = 14.sp, color = TextTertiary)
-                            }
-                        } else {
-                            filteredPois.forEach { poi ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(poi.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                                            poi.address?.let {
-                                                Text(it, fontSize = 12.sp, color = TextSecondary)
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedPoi = poi
-                                        poiExpanded = false
-                                        poiSearchQuery = ""
-                                    },
-                                    leadingIcon = {
+                    ExposedDropdownMenu(
+                        expanded = poiExpanded,
+                        onDismissRequest = { poiExpanded = false }
+                    ) {
+                        warehousePois.forEach { poi ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             Icons.Rounded.LocationOn,
                                             null,
                                             tint = TruckOrange,
                                             modifier = Modifier.size(20.dp)
                                         )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(poi.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                                            Text("大兴机场货运区", fontSize = 12.sp, color = TextSecondary)
+                                        }
                                     }
-                                )
-                            }
+                                },
+                                onClick = {
+                                    selectedPoi = poi
+                                    poiExpanded = false
+                                }
+                            )
+                            HorizontalDivider(color = DividerColor)
                         }
                     }
                 }
@@ -3610,7 +3622,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
         // 语音提示卡片
         TipCard(
-            text = "点击「语音填写」，说出货物信息，例如：10吨普通货物送到3号仓库",
+            text = "点击「语音填写」，说出货物信息，例如：10吨普通货物送到大兴南航国际货站",
             icon = Icons.Rounded.Lightbulb,
             backgroundColor = TruckOrangeLight,
             iconColor = TruckOrange

@@ -543,8 +543,8 @@ private fun WelcomeSection(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = if (isProfessional) "货运导航、货物报备、路况查询，有什么可以帮你？"
-            else "导航出行、停车查询、行程管理，有什么可以帮你？",
+            text = if (isProfessional) "货物报备、路线规划、道路限制，有什么可以帮你？"
+            else "便民设施、停车查询、餐饮购物，有什么可以帮你？",
             fontSize = 14.sp,
             color = TextSecondary,
             textAlign = TextAlign.Center
@@ -563,17 +563,19 @@ private fun WelcomeSection(
 
         val suggestions = if (isProfessional) {
             listOf(
-                "导航到3号仓库",
-                "查询今天的路况",
-                "哪个停车区适合大货车？",
-                "危化品车从哪个门进？"
+                "危化品车晚上能进货运区吗？",
+                "货车限高多少米，超高怎么办？",
+                "危化品车辆需要提前多久报备？",
+                "仓库监控可以保存多少天？",
+                "货车在货运区内限速多少？"
             )
         } else {
             listOf(
-                "导航到T2航站楼",
-                "哪个停车场有空位？",
-                "附近有什么好吃的？",
-                "今天机场路堵不堵？"
+                "停车场怎么走，P1停车楼在哪？",
+                "高铁站在航站楼哪一层？",
+                "航班延误了怎么办？",
+                "安检需要多长时间，建议提前多久到？",
+                "机场哪里可以免费充电？"
             )
         }
 

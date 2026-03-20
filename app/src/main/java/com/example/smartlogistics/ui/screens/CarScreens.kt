@@ -1680,30 +1680,20 @@ fun CarRouteScreen(navController: NavController, viewModel: MainViewModel? = nul
         // 快捷目的地列表
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CarQuickDestinationItem(
-                icon = Icons.Rounded.Home,
-                title = "家",
-                subtitle = "北京市海淀区中关村",
-                onClick = {
-                    // 直接跳转到导航页面
-                    val encodedDest = Uri.encode("北京市海淀区中关村")
-                    navController.navigate("navigation_map?destination=$encodedDest")
-                }
-            )
-            CarQuickDestinationItem(
-                icon = Icons.Rounded.Work,
-                title = "公司",
-                subtitle = "北京市朝阳区望京",
-                onClick = {
-                    val encodedDest = Uri.encode("北京市朝阳区望京")
-                    navController.navigate("navigation_map?destination=$encodedDest")
-                }
-            )
-            CarQuickDestinationItem(
                 icon = Icons.Rounded.Flight,
-                title = "机场",
-                subtitle = "北京首都国际机场",
+                title = "大兴机场航站楼",
+                subtitle = "北京大兴国际机场",
                 onClick = {
-                    val encodedDest = Uri.encode("北京首都国际机场")
+                    val encodedDest = Uri.encode("DIRECT:::大兴机场航站楼:::39.509816:::116.410004")
+                    navController.navigate("navigation_map?destination=$encodedDest")
+                }
+            )
+            CarQuickDestinationItem(
+                icon = Icons.Rounded.Train,
+                title = "大兴机场高铁站",
+                subtitle = "京雄城际/大兴机场线换乘",
+                onClick = {
+                    val encodedDest = Uri.encode("DIRECT:::大兴机场高铁站:::39.506900:::116.422600")
                     navController.navigate("navigation_map?destination=$encodedDest")
                 }
             )

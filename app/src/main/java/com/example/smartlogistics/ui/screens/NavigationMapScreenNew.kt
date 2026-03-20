@@ -1226,37 +1226,39 @@ fun NavigationMapScreenNew(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ⭐ 闸口实况按钮（WebSocket实时数据）
-                Surface(
-                    onClick = { showGatePanel = !showGatePanel },
-                    modifier = Modifier.size(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White,
-                    shadowElevation = 4.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Traffic,
-                            contentDescription = "闸口实况",
-                            tint = if (showGatePanel) primaryColor else TextSecondary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        // 连接状态指示器
-                        if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTED) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(8.dp)
-                                    .background(Color(0xFF4CAF50), CircleShape)
+                // ⭐ 闸口实况按钮（仅货车端显示）
+                if (isProfessional) {
+                    Surface(
+                        onClick = { showGatePanel = !showGatePanel },
+                        modifier = Modifier.size(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White,
+                        shadowElevation = 4.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Traffic,
+                                contentDescription = "闸口实况",
+                                tint = if (showGatePanel) primaryColor else TextSecondary,
+                                modifier = Modifier.size(26.dp)
                             )
-                        } else if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTING ||
-                            trafficConnectionState == TrafficWebSocket.ConnectionState.RECONNECTING) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(8.dp)
-                                    .background(Color(0xFFFFC107), CircleShape)
-                            )
+                            // 连接状态指示器
+                            if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTED) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(8.dp)
+                                        .background(Color(0xFF4CAF50), CircleShape)
+                                )
+                            } else if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTING ||
+                                trafficConnectionState == TrafficWebSocket.ConnectionState.RECONNECTING) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(8.dp)
+                                        .background(Color(0xFFFFC107), CircleShape)
+                                )
+                            }
                         }
                     }
                 }

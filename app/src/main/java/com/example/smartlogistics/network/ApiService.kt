@@ -419,4 +419,12 @@ interface ApiService {
         @Query("role") role: String = "personal"
     ): Response<PersonalParkingBestResponse>
 
+
+    /**
+     * 获取货运仓库 POI（专业端）
+     * GET /api/pois/warehouses
+     */
+    @GET("pois/warehouses")
+    suspend fun getWarehouses(): Response<WarehousesResponse>
+
 }

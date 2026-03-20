@@ -605,6 +605,20 @@ data class PersonalParkingBestResponse(
     val message: String? = null,
     val data: PersonalParkingItem? = null
 )
+
+// ==================== 货运仓库 POI ====================
+
+data class WarehouseItem(
+    val id: String = "",
+    val name: String = "",
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val type: String = ""
+)
+
+data class WarehousesResponse(
+    val warehouses: List<WarehouseItem>? = null
+)
 // ==================== 闸口和停车场 POI ====================
 
 data class GatePoiItem(
