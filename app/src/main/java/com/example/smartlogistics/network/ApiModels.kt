@@ -407,11 +407,55 @@ data class RoadTraffic(
     val status: String  // "Free Flow", "Slow", "Congested"
 )
 
+@JsonAdapter(GateQueuesAdapter::class)
 data class GateQueuesResponse(
-    val queues: Map<String, Int>? = null,
-    // 扩展字段：每个闸口的状态（idle/normal/busy）
-    val statuses: Map<String, String>? = null
+    val queues: Map<String, Int>? = null
 )
+
+// 后端直接返回 {"Gate_N1": 3, "Gate_S1": 7}，没有 queues 包装层
+class GateQueuesAdapter : com.google.gson.TypeAdapter<GateQueuesResponse>() {
+    override fun write(out: com.google.gson.stream.JsonWriter, value: GateQueuesResponse?) {
+        out.nullValue()
+    }
+    override fun read(reader: com.google.gson.stream.JsonReader): GateQueuesResponse {
+        val map = mutableMapOf<String, Int>()
+        return try {
+            when (reader.peek()) {
+                com.google.gson.stream.JsonToken.BEGIN_OBJECT -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        val key = reader.nextName()
+                        when (reader.peek()) {
+                            com.google.gson.stream.JsonToken.NUMBER -> {
+                                try { map[key] = reader.nextInt() }
+                                catch (e: Exception) { reader.skipValue() }
+                            }
+                            com.google.gson.stream.JsonToken.BEGIN_OBJECT -> {
+                                // 可能是 {"Gate_N1": {"queue": 3, ...}} 格式
+                                var queueCount = 0
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    val field = reader.nextName()
+                                    if (field == "queue" || field == "queue_length" || field == "count") {
+                                        queueCount = try { reader.nextInt() } catch (e: Exception) { reader.skipValue(); 0 }
+                                    } else { reader.skipValue() }
+                                }
+                                reader.endObject()
+                                map[key] = queueCount
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+            GateQueuesResponse(queues = map.ifEmpty { null })
+        } catch (e: Exception) {
+            GateQueuesResponse(queues = null)
+        }
+    }
+}
 
 data class GateRecommendResponse(
     @SerializedName("recommended_gate") val recommendedGate: String?,
@@ -450,6 +494,44 @@ data class TripHistory(
     @SerializedName("trip_date") val tripDate: String,
     val status: String? = null,
     @SerializedName("created_at") val createdAt: String? = null
+)
+
+// ==================== 闸口和停车场 POI ====================
+
+data class GatePoiItem(
+    val id: String? = null,
+    val name: String? = null,
+    val lat: Double = 0.0,
+    // 后端可能用 lon 或 lng，两个都兼容
+    val lon: Double? = null,
+    val lng: Double? = null,
+    val status: String? = null,
+    @SerializedName("queue_count") val queueCount: Int? = null
+) {
+    val longitude: Double get() = lon ?: lng ?: 0.0
+}
+
+data class GatesResponse(
+    val status: String? = null,
+    val gates: List<GatePoiItem>? = null
+)
+
+data class ParkingPoiItem(
+    val id: String? = null,
+    val name: String? = null,
+    val lat: Double = 0.0,
+    val lon: Double? = null,
+    val lng: Double? = null,
+    @SerializedName("total_spots") val totalSpots: Int? = null,
+    @SerializedName("available_spots") val availableSpots: Int? = null,
+    val status: String? = null
+) {
+    val longitude: Double get() = lon ?: lng ?: 0.0
+}
+
+data class ParkingLotsResponse(
+    val status: String? = null,
+    @SerializedName("parking_lots") val parkingLots: List<ParkingPoiItem>? = null
 )
 
 // ==================== 通用响应 ====================

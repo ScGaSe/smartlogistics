@@ -54,6 +54,7 @@ import com.example.smartlogistics.ui.components.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.utils.CameraUtils
 import com.example.smartlogistics.utils.ParkingManager
+import com.example.smartlogistics.utils.SettingsManager
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.TripState
 import com.example.smartlogistics.viewmodel.VehicleState
@@ -340,10 +341,12 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var isParkingUploading by remember { mutableStateOf(false) }
     var isGettingLocation by remember { mutableStateOf(false) }
     var isFindingCar by remember { mutableStateOf(false) }
-// ========== 楼层和车位号状态 ==========
+
+    // ========== 楼层和车位号状态 ==========
     var selectedFloor by remember { mutableStateOf(1) }   // 1=B1, 2=B2, 3=B3
     var spotCodeInput by remember { mutableStateOf("") }
     var findCarApiResult by remember { mutableStateOf<com.example.smartlogistics.network.ParkingFindResponse?>(null) }
+
     // 高德定位客户端
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
 
@@ -603,15 +606,16 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 photoUri = parkingPhotoUri,
                 type = "photo"
             )
-            addRecordAndSave(newRecord)
+            addRecordAndSave(newRecord)  // ⭐ 保存到持久化存储
             Toast.makeText(context, "照片已保存", Toast.LENGTH_SHORT).show()
 
-            // ⭐ 异步上报后端（不阻塞UI）
+            // ⭐ 上报后端（异步，不阻塞UI）
             scope.launch(Dispatchers.IO) {
                 try {
                     val inputStream = context.contentResolver.openInputStream(parkingPhotoUri!!)
                     val tempFile = java.io.File(context.cacheDir, "parking_upload.jpg")
                     inputStream?.use { input -> tempFile.outputStream().use { input.copyTo(it) } }
+
                     repository.registerParkingPhoto(
                         imageFile = tempFile,
                         floor = selectedFloor.toString(),
@@ -636,7 +640,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
-    // ⭐ 寻车拍照（调用真实后端接口）
+    // ⭐ 寻车拍照（调用真实后端接口匹配）
     val findCarCameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
@@ -658,19 +662,16 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                             showFindCarResultDialog = true
                         }
                         is com.example.smartlogistics.network.NetworkResult.Error -> {
-                            findCarApiResult = null
                             findCarResult = "匹配失败: ${result.message}"
                             showFindCarResultDialog = true
                         }
                         else -> {
-                            findCarApiResult = null
                             findCarResult = "网络错误，请重试"
                             showFindCarResultDialog = true
                         }
                     }
                     tempFile.delete()
                 } catch (e: Exception) {
-                    findCarApiResult = null
                     findCarResult = "出错: ${e.message}"
                     showFindCarResultDialog = true
                 } finally {
@@ -912,11 +913,8 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 // 记录停车位置
                 Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                 Spacer(modifier = Modifier.height(12.dp))
-// 记录停车位置
-                Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                Spacer(modifier = Modifier.height(12.dp))
 
-// ⭐ 楼层选择
+                // ========== ⭐ 楼层选择（B1/B2/B3）==========
                 Text(text = "停车楼层", fontSize = 13.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -928,7 +926,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isSelected) CarGreen else CarGreen.copy(alpha = 0.08f)
                             ),
-                            border = if (isSelected) null else BorderStroke(1.dp, CarGreen.copy(alpha = 0.3f))
+                            border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, CarGreen.copy(alpha = 0.3f))
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -942,7 +940,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     }
                 }
 
-// ⭐ 车位号输入
+                // ========== ⭐ 车位号输入 ==========
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
                     value = spotCodeInput,
@@ -959,9 +957,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                         Icon(imageVector = Icons.Rounded.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                     }
                 )
+
                 Spacer(modifier = Modifier.height(12.dp))
 
-// 原来的两个操作按钮 Row（标记位置 + 拍照记录）保持不变...
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     // 标记位置
                     Card(
@@ -1319,15 +1317,15 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // ⭐ 结构化展示楼层/车位号/时间/置信度
+                    // ⭐ 展示楼层和车位号
                     if (matchResult != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
                         ) {
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
                                 // 停车位置
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("📍", fontSize = 16.sp)
@@ -1335,18 +1333,21 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                                     Column {
                                         Text("停车位置", fontSize = 12.sp, color = TextSecondary)
                                         val floorText = when (matchResult.floor) {
-                                            1 -> "B1层"; 2 -> "B2层"; 3 -> "B3层"
+                                            1 -> "B1层"
+                                            2 -> "B2层"
+                                            3 -> "B3层"
                                             else -> matchResult.floor?.let { "${it}层" } ?: "—"
                                         }
-                                        val locationText = when {
-                                            !matchResult.spotCode.isNullOrBlank() -> "$floorText ${matchResult.spotCode}号车位"
-                                            !matchResult.parkingArea.isNullOrBlank() -> matchResult.parkingArea
-                                            else -> floorText
+                                        val locationText = if (!matchResult.spotCode.isNullOrBlank()) {
+                                            "$floorText ${matchResult.spotCode}号车位"
+                                        } else if (!matchResult.parkingArea.isNullOrBlank()) {
+                                            matchResult.parkingArea
+                                        } else {
+                                            floorText
                                         }
                                         Text(locationText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
                                     }
                                 }
-
                                 // 停车时间
                                 if (!matchResult.parkedTime.isNullOrBlank()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1354,15 +1355,13 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text("停车时间", fontSize = 12.sp, color = TextSecondary)
-                                            // 格式化时间：取 HH:mm 部分
-                                            val timeDisplay = matchResult.parkedTime
-                                                .substringAfter(" ").substringBeforeLast(":")
-                                                .ifBlank { matchResult.parkedTime }
+                                            val timeDisplay = matchResult.parkedTime.substringAfter("T").substringBefore(":").let {
+                                                matchResult.parkedTime.substringAfter(" ").substringBeforeLast(":").ifBlank { matchResult.parkedTime }
+                                            }
                                             Text(timeDisplay, fontSize = 14.sp, color = TextPrimary)
                                         }
                                     }
                                 }
-
                                 // 匹配置信度
                                 if (!matchResult.confidence.isNullOrBlank()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1371,7 +1370,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                                         Column {
                                             Text("匹配置信度", fontSize = 12.sp, color = TextSecondary)
                                             val confidenceText = when (matchResult.confidence) {
-                                                "high" -> "高"; "medium" -> "中"; "low" -> "低"
+                                                "high" -> "高"
+                                                "medium" -> "中"
+                                                "low" -> "低"
                                                 else -> matchResult.confidence
                                             }
                                             Text(confidenceText, fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
@@ -1930,6 +1931,13 @@ enum class RoadCongestionLevel(val label: String, val color: Color, val textColo
 
 @Composable
 fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null) {
+    val context = LocalContext.current
+    // ⭐ 模拟位置
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    val isMockMode = settingsManager.mockLocationEnabled
+    val mockLat = if (isMockMode) SettingsManager.DAXING_LAT else null
+    val mockLng = if (isMockMode) SettingsManager.DAXING_LNG else null
+
     // 状态管理
     var isRefreshing by remember { mutableStateOf(false) }
     var lastUpdateTime by remember { mutableStateOf("刚刚更新") }
@@ -1964,13 +1972,22 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
 
     // 定位到当前位置
     fun locateToCurrentPosition() {
-        currentLocation?.let { location ->
+        if (isMockMode) {
             aMapInstance?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
-                    LatLng(location.latitude, location.longitude),
-                    16f
+                    com.amap.api.maps.model.LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG),
+                    SettingsManager.DAXING_ZOOM
                 )
             )
+        } else {
+            currentLocation?.let { location ->
+                aMapInstance?.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(location.latitude, location.longitude),
+                        16f
+                    )
+                )
+            }
         }
     }
 
@@ -2051,9 +2068,51 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         modifier = Modifier.fillMaxSize(),
                         showTraffic = true,
                         showMyLocation = true,
-                        autoLocateOnStart = true,  // 首次定位自动移动到当前位置
+                        autoLocateOnStart = !isMockMode,
+                        mockLat = mockLat,
+                        mockLng = mockLng,
                         onMapReady = { map ->
                             aMapInstance = map
+                            // ⭐ 从真实接口加载停车场 Marker
+                            val carScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
+                            carScope.launch {
+                                try {
+                                    val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.example.smartlogistics.network.RetrofitClient.apiService.getParkingLots()
+                                    }
+                                    if (resp.isSuccessful && resp.body()?.parkingLots != null) {
+                                        resp.body()!!.parkingLots!!.forEach { lot ->
+                                            val pos = com.amap.api.maps.model.LatLng(lot.lat, lot.longitude)
+                                            map.addMarker(
+                                                com.amap.api.maps.model.MarkerOptions()
+                                                    .position(pos)
+                                                    .title(lot.name ?: lot.id ?: "停车场")
+                                                    .snippet(lot.id ?: "")
+                                            )
+                                        }
+                                        // 点击 Marker 显示空位信息
+                                        map.setOnMarkerClickListener { marker ->
+                                            val lotId = marker.snippet
+                                            val lot = resp.body()!!.parkingLots!!.find { it.id == lotId }
+                                            val info = if (lot?.availableSpots != null && lot.totalSpots != null) {
+                                                val statusText = when {
+                                                    lot.availableSpots > lot.totalSpots * 0.3 -> "空位充足"
+                                                    lot.availableSpots > 0 -> "较为拥挤"
+                                                    else -> "接近满位"
+                                                }
+                                                "空位${lot.availableSpots}/${lot.totalSpots} · $statusText"
+                                            } else "点击查看车位情况"
+                                            marker.snippet = info
+                                            marker.showInfoWindow()
+                                            true
+                                        }
+                                    } else {
+                                        android.util.Log.w("CarRoad", "停车场接口未就绪")
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("CarRoad", "加载停车场失败: ${e.message}")
+                                }
+                            }
                         },
                         onLocationChanged = { location ->
                             currentLocation = location
@@ -2079,6 +2138,32 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                             contentDescription = "定位",
                             modifier = Modifier.size(22.dp)
                         )
+                    }
+
+                    // ⭐ 大兴机场快捷按钮
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                            .clickable {
+                                aMapInstance?.animateCamera(
+                                    com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+                                        com.amap.api.maps.model.LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG), SettingsManager.DAXING_ZOOM
+                                    )
+                                )
+                            },
+                        color = CarGreen,
+                        shape = RoundedCornerShape(20.dp),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("✈", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("大兴", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                        }
                     }
 
                     // 更新时间标签
@@ -2486,6 +2571,11 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
         viewModel?.predictCongestion(roadId = "airport_expressway", hours = predictHours)
         kotlinx.coroutines.delay(800)
         isLoading = false
+    }
+
+    // ★★★ 初始加载停车场数据（大兴机场中心坐标）★★★
+    LaunchedEffect(Unit) {
+        viewModel?.fetchNearbyParking(lat = 39.5095, lng = 116.4105, radius = 3000)
     }
 
     // 后端返回的拥堵预测数据转换为UI格式

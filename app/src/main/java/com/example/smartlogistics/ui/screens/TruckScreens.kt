@@ -46,6 +46,7 @@ import com.example.smartlogistics.utils.HazmatRecognitionResult
 import com.example.smartlogistics.utils.HazmatClass
 import com.example.smartlogistics.utils.XunfeiSpeechHelper
 import com.example.smartlogistics.utils.CameraUtils
+import com.example.smartlogistics.utils.SettingsManager
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.viewmodel.VehicleState
 import com.example.smartlogistics.viewmodel.ReportState
@@ -1034,6 +1035,11 @@ enum class TruckRoadCongestionLevel(val label: String, val color: Color, val tex
 @Composable
 fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = null) {
     val context = LocalContext.current
+    // ⭐ 模拟位置
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    val isMockMode = settingsManager.mockLocationEnabled
+    val mockLat = if (isMockMode) SettingsManager.DAXING_LAT else null
+    val mockLng = if (isMockMode) SettingsManager.DAXING_LNG else null
 
     // 状态管理
     var isRefreshing by remember { mutableStateOf(false) }
@@ -1145,13 +1151,22 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
 
     // 定位到当前位置
     fun locateToCurrentPosition() {
-        currentLocation?.let { location ->
+        if (isMockMode) {
             aMapInstance?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
-                    LatLng(location.latitude, location.longitude),
-                    16f
+                    com.amap.api.maps.model.LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG),
+                    SettingsManager.DAXING_ZOOM
                 )
             )
+        } else {
+            currentLocation?.let { location ->
+                aMapInstance?.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(location.latitude, location.longitude),
+                        16f
+                    )
+                )
+            }
         }
     }
 
@@ -1232,9 +1247,46 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         modifier = Modifier.fillMaxSize(),
                         showTraffic = true,
                         showMyLocation = true,
-                        autoLocateOnStart = true,  // 首次定位自动移动到当前位置
+                        autoLocateOnStart = !isMockMode,
+                        mockLat = mockLat,
+                        mockLng = mockLng,
                         onMapReady = { map ->
                             aMapInstance = map
+                            // ⭐ 从真实接口加载闸口 Marker
+                            scope.launch {
+                                try {
+                                    val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+                                    }
+                                    if (resp.isSuccessful && resp.body()?.gates != null) {
+                                        resp.body()!!.gates!!.forEach { gate ->
+                                            val pos = com.amap.api.maps.model.LatLng(gate.lat, gate.longitude)
+                                            map.addMarker(
+                                                com.amap.api.maps.model.MarkerOptions()
+                                                    .position(pos)
+                                                    .title(gate.name ?: gate.id ?: "闸口")
+                                                    .snippet(gate.id ?: "")
+                                            )
+                                        }
+                                        // 点击 Marker 显示排队信息
+                                        map.setOnMarkerClickListener { marker ->
+                                            val gateId = marker.snippet
+                                            val queueCount = roadSegments.find { it.id == gateId }
+                                                ?.estimatedTime?.removePrefix("排队: ")?.removeSuffix("辆")?.toIntOrNull()
+                                            val info = if (queueCount != null) "排队${queueCount}辆 · 约${queueCount * 3}分钟"
+                                            else "点击查看排队情况"
+                                            marker.snippet = info
+                                            marker.showInfoWindow()
+                                            true
+                                        }
+                                    } else {
+                                        // 接口未就绪时使用默认坐标
+                                        android.util.Log.w("TruckRoad", "闸口接口未就绪，使用默认坐标")
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("TruckRoad", "加载闸口失败: ${e.message}")
+                                }
+                            }
                         },
                         onLocationChanged = { location ->
                             currentLocation = location
@@ -1260,6 +1312,32 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             contentDescription = "定位",
                             modifier = Modifier.size(22.dp)
                         )
+                    }
+
+                    // ⭐ 大兴机场快捷按钮
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                            .clickable {
+                                aMapInstance?.animateCamera(
+                                    com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(
+                                        com.amap.api.maps.model.LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG), SettingsManager.DAXING_ZOOM
+                                    )
+                                )
+                            },
+                        color = TruckOrange,
+                        shape = RoundedCornerShape(20.dp),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("✈", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("大兴", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                        }
                     }
 
                     // 更新时间标签
@@ -3676,7 +3754,7 @@ private fun CargoVoiceDialog(
                         repeat(5) { index ->
                             val baseHeight = when (index) {
                                 2 -> 20f
-                                1, 3 -> 14f
+                                1, 3 -> 13f
                                 else -> 8f
                             }
                             val height = baseHeight * (0.4f + volumeLevel * 0.6f)

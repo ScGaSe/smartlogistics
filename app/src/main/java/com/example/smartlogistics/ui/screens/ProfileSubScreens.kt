@@ -47,13 +47,13 @@ fun EditProfileScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     // 获取设置管理器
     val settingsManager = remember { SettingsManager.getInstance(context) }
-    
+
     // 获取真实用户信息
     val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
-    
+
     // 真实手机号（脱敏显示）
     val realPhone = userInfo?.phoneNumber ?: viewModel?.getUserName() ?: ""
     val maskedPhone = if (realPhone.length >= 11) {
@@ -61,17 +61,17 @@ fun EditProfileScreen(
     } else {
         realPhone
     }
-    
+
     // 用户信息状态 - 从本地读取昵称，默认使用手机号
-    var nickname by remember { 
-        mutableStateOf(settingsManager.getNickname() ?: realPhone) 
+    var nickname by remember {
+        mutableStateOf(settingsManager.getNickname() ?: realPhone)
     }
     var isEditing by remember { mutableStateOf(false) }
-    
+
     // 头像状态
     var avatarBitmap by remember { mutableStateOf(settingsManager.getAvatarBitmap()) }
     var avatarUpdateTrigger by remember { mutableStateOf(0) }
-    
+
     // 图片选择器
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -86,14 +86,14 @@ fun EditProfileScreen(
             }
         }
     }
-    
+
     // 更新昵称（当 realPhone 变化时）
     LaunchedEffect(realPhone) {
         if (settingsManager.getNickname() == null && realPhone.isNotEmpty()) {
             nickname = realPhone
         }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -150,7 +150,7 @@ fun EditProfileScreen(
                             .size(100.dp)
                             .clip(CircleShape)
                             .background(primaryColor.copy(alpha = 0.1f))
-                            .clickable(enabled = isEditing) { 
+                            .clickable(enabled = isEditing) {
                                 imagePickerLauncher.launch("image/*")
                             },
                         contentAlignment = Alignment.Center
@@ -171,7 +171,7 @@ fun EditProfileScreen(
                                 tint = primaryColor
                             )
                         }
-                        
+
                         if (isEditing) {
                             Box(
                                 modifier = Modifier
@@ -188,7 +188,7 @@ fun EditProfileScreen(
                             }
                         }
                     }
-                    
+
                     if (isEditing) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
@@ -199,9 +199,9 @@ fun EditProfileScreen(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             // 信息编辑区域
             Card(
                 modifier = Modifier
@@ -219,17 +219,17 @@ fun EditProfileScreen(
                         isEditing = isEditing,
                         primaryColor = primaryColor
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 12.dp))
-                    
+
                     // 手机号（显示真实手机号，脱敏，不可编辑）
                     ProfileDisplayItem(
                         label = "手机号",
                         value = maskedPhone
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(vertical = 12.dp))
-                    
+
                     // 用户角色
                     ProfileDisplayItem(
                         label = "用户类型",
@@ -237,9 +237,9 @@ fun EditProfileScreen(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 提示信息
             Text(
                 text = "修改昵称后，将在所有设备上同步显示",
@@ -261,7 +261,7 @@ fun AccountSecurityScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -295,9 +295,9 @@ fun AccountSecurityScreen(
                         subtitle = "定期修改密码更安全",
                         onClick = { navController.navigate("change_password") }
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     // 指纹登录
                     SecurityToggleItem(
                         icon = Icons.Rounded.Fingerprint,
@@ -307,9 +307,9 @@ fun AccountSecurityScreen(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            
+
             // 账号注销
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -339,14 +339,14 @@ fun NotificationSettingsScreen(
 ) {
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     var pushEnabled by remember { mutableStateOf(true) }
     var soundEnabled by remember { mutableStateOf(true) }
     var vibrationEnabled by remember { mutableStateOf(true) }
     var trafficAlert by remember { mutableStateOf(true) }
     var tripReminder by remember { mutableStateOf(true) }
     var systemNotice by remember { mutableStateOf(true) }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -376,7 +376,7 @@ fun NotificationSettingsScreen(
                 color = TextSecondary,
                 modifier = Modifier.padding(start = 4.dp)
             )
-            
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -391,9 +391,9 @@ fun NotificationSettingsScreen(
                         onCheckedChange = { pushEnabled = it },
                         primaryColor = primaryColor
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     NotificationToggleItem(
                         icon = Icons.Rounded.VolumeUp,
                         title = "声音",
@@ -403,9 +403,9 @@ fun NotificationSettingsScreen(
                         enabled = pushEnabled,
                         primaryColor = primaryColor
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     NotificationToggleItem(
                         icon = Icons.Rounded.Vibration,
                         title = "振动",
@@ -417,7 +417,7 @@ fun NotificationSettingsScreen(
                     )
                 }
             }
-            
+
             // 通知类型
             Text(
                 text = "通知类型",
@@ -425,7 +425,7 @@ fun NotificationSettingsScreen(
                 color = TextSecondary,
                 modifier = Modifier.padding(start = 4.dp, top = 8.dp)
             )
-            
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -441,9 +441,9 @@ fun NotificationSettingsScreen(
                         enabled = pushEnabled,
                         primaryColor = primaryColor
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     NotificationToggleItem(
                         icon = Icons.Rounded.Schedule,
                         title = "行程提醒",
@@ -453,9 +453,9 @@ fun NotificationSettingsScreen(
                         enabled = pushEnabled,
                         primaryColor = primaryColor
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     NotificationToggleItem(
                         icon = Icons.Rounded.Campaign,
                         title = "系统公告",
@@ -480,7 +480,7 @@ fun HelpCenterScreen(
 ) {
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     val faqList = remember {
         if (isProfessional) {
             listOf(
@@ -500,9 +500,9 @@ fun HelpCenterScreen(
             )
         }
     }
-    
+
     var expandedIndex by remember { mutableStateOf(-1) }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -531,7 +531,7 @@ fun HelpCenterScreen(
                 color = TextSecondary,
                 modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
             )
-            
+
             faqList.forEachIndexed { index, faq ->
                 FAQItem(
                     question = faq.question,
@@ -557,7 +557,9 @@ fun AboutScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    var mockLocationEnabled by remember { mutableStateOf(settingsManager.mockLocationEnabled) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -592,9 +594,9 @@ fun AboutScreen(
                         .clip(RoundedCornerShape(20.dp))
                         .background(
                             Brush.linearGradient(
-                                colors = if (isProfessional) 
+                                colors = if (isProfessional)
                                     listOf(TruckOrange, TruckYellow)
-                                else 
+                                else
                                     listOf(CarGreen, CarTeal)
                             )
                         ),
@@ -607,27 +609,27 @@ fun AboutScreen(
                         tint = Color.White
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Text(
                     text = "HubLink Navigator",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
-                
+
                 Spacer(modifier = Modifier.height(4.dp))
-                
+
                 Text(
                     text = "版本 1.0.0",
                     fontSize = 14.sp,
                     color = TextSecondary
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             // 功能列表
             Card(
                 modifier = Modifier
@@ -644,25 +646,25 @@ fun AboutScreen(
                             Toast.makeText(context, "当前已是最新版本", Toast.LENGTH_SHORT).show()
                         }
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     AboutMenuItem(
                         icon = Icons.Rounded.Description,
                         title = "用户协议",
                         onClick = { navController.navigate("user_agreement") }
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     AboutMenuItem(
                         icon = Icons.Rounded.PrivacyTip,
                         title = "隐私政策",
                         onClick = { navController.navigate("privacy_policy") }
                     )
-                    
+
                     HorizontalDivider(color = DividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-                    
+
                     AboutMenuItem(
                         icon = Icons.Rounded.Star,
                         title = "给我们评分",
@@ -672,9 +674,70 @@ fun AboutScreen(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(32.dp))
-            
+
+            // ⭐ 演示模式卡片
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                if (mockLocationEnabled) primaryColor.copy(alpha = 0.12f)
+                                else BackgroundSecondary,
+                                RoundedCornerShape(10.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✈", fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "演示模式（大兴机场）",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = if (mockLocationEnabled) "当前位置已模拟为大兴机场" else "开启后定位将切换到大兴机场",
+                            fontSize = 12.sp,
+                            color = if (mockLocationEnabled) primaryColor else TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = mockLocationEnabled,
+                        onCheckedChange = {
+                            mockLocationEnabled = it
+                            settingsManager.mockLocationEnabled = it
+                            Toast.makeText(
+                                context,
+                                if (it) "演示模式已开启，重新进入地图页生效" else "演示模式已关闭",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = primaryColor
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             // 版权信息
             Text(
                 text = "© 2026 HubLink Navigator\n智慧枢纽导航系统",
@@ -683,7 +746,7 @@ fun AboutScreen(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
-            
+
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
@@ -860,7 +923,7 @@ private fun ProfileEditItem(
             fontSize = 14.sp,
             color = TextSecondary
         )
-        
+
         if (isEditing) {
             OutlinedTextField(
                 value = value,
@@ -899,7 +962,7 @@ private fun ProfileDisplayItem(
             fontSize = 14.sp,
             color = TextSecondary
         )
-        
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = value,
@@ -936,9 +999,9 @@ private fun SecurityMenuItem(
             tint = iconTint,
             modifier = Modifier.size(24.dp)
         )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -952,7 +1015,7 @@ private fun SecurityMenuItem(
                 color = TextSecondary
             )
         }
-        
+
         Icon(
             imageVector = Icons.Rounded.ChevronRight,
             contentDescription = null,
@@ -969,7 +1032,7 @@ private fun SecurityToggleItem(
     primaryColor: Color
 ) {
     var checked by remember { mutableStateOf(true) }
-    
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -982,9 +1045,9 @@ private fun SecurityToggleItem(
             tint = TextSecondary,
             modifier = Modifier.size(24.dp)
         )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -998,7 +1061,7 @@ private fun SecurityToggleItem(
                 color = TextSecondary
             )
         }
-        
+
         Switch(
             checked = checked,
             onCheckedChange = { checked = it },
@@ -1033,9 +1096,9 @@ private fun NotificationToggleItem(
             tint = TextSecondary,
             modifier = Modifier.size(24.dp)
         )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -1049,7 +1112,7 @@ private fun NotificationToggleItem(
                 color = TextSecondary
             )
         }
-        
+
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -1109,14 +1172,14 @@ private fun FAQItem(
                         fontWeight = FontWeight.Medium
                     )
                 }
-                
+
                 Icon(
                     imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     contentDescription = null,
                     tint = TextTertiary
                 )
             }
-            
+
             AnimatedVisibility(visible = isExpanded) {
                 Column {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1153,16 +1216,16 @@ private fun AboutMenuItem(
             tint = TextSecondary,
             modifier = Modifier.size(24.dp)
         )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
-        
+
         Text(
             text = title,
             fontSize = 16.sp,
             color = TextPrimary,
             modifier = Modifier.weight(1f)
         )
-        
+
         Icon(
             imageVector = Icons.Rounded.ChevronRight,
             contentDescription = null,
@@ -1181,18 +1244,18 @@ fun ChangePasswordScreen(
     val context = LocalContext.current
     val isProfessional = viewModel?.isProfessionalMode() ?: false
     val primaryColor = if (isProfessional) TruckOrange else CarGreen
-    
+
     // 获取真实手机号
     val userInfo by viewModel?.userInfo?.collectAsState() ?: remember { mutableStateOf(null) }
     val phoneNumber = userInfo?.phoneNumber ?: viewModel?.getUserName() ?: ""
-    
+
     // 脱敏手机号
     val maskedPhone = if (phoneNumber.length >= 11) {
         "${phoneNumber.substring(0, 3)}****${phoneNumber.substring(7)}"
     } else {
         phoneNumber
     }
-    
+
     // 表单状态
     var verifyCode by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
@@ -1200,11 +1263,11 @@ fun ChangePasswordScreen(
     var countdown by remember { mutableStateOf(0) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
-    
+
     // 监听认证状态
     val authState by viewModel?.authState?.collectAsState() ?: remember { mutableStateOf(null) }
     val isLoading = authState is com.example.smartlogistics.viewmodel.AuthState.Loading
-    
+
     // 倒计时
     LaunchedEffect(countdown) {
         if (countdown > 0) {
@@ -1212,7 +1275,7 @@ fun ChangePasswordScreen(
             countdown--
         }
     }
-    
+
     // 处理状态变化
     LaunchedEffect(authState) {
         when (authState) {
@@ -1235,22 +1298,22 @@ fun ChangePasswordScreen(
             else -> {}
         }
     }
-    
+
     // 离开页面时重置状态
     DisposableEffect(Unit) {
         onDispose {
             viewModel?.resetAuthState()
         }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("修改密码", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
-                    IconButton(onClick = { 
+                    IconButton(onClick = {
                         viewModel?.resetAuthState()
-                        navController.popBackStack() 
+                        navController.popBackStack()
                     }) {
                         Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
                     }
@@ -1289,7 +1352,7 @@ fun ChangePasswordScreen(
                     )
                 }
             }
-            
+
             // 手机号提示
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1314,9 +1377,9 @@ fun ChangePasswordScreen(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            
+
             // 验证码输入
             Text(
                 text = "验证码",
@@ -1325,10 +1388,10 @@ fun ChangePasswordScreen(
                 color = TextPrimary,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            
+
             OutlinedTextField(
                 value = verifyCode,
-                onValueChange = { 
+                onValueChange = {
                     if (it.length <= 6 && it.all { c -> c.isDigit() }) {
                         verifyCode = it
                         showError = false
@@ -1361,9 +1424,9 @@ fun ChangePasswordScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            
+
             Spacer(modifier = Modifier.height(20.dp))
-            
+
             // 新密码
             Text(
                 text = "新密码",
@@ -1372,11 +1435,11 @@ fun ChangePasswordScreen(
                 color = TextPrimary,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            
+
             var showNewPassword by remember { mutableStateOf(false) }
             OutlinedTextField(
                 value = newPassword,
-                onValueChange = { 
+                onValueChange = {
                     newPassword = it
                     showError = false
                 },
@@ -1400,9 +1463,9 @@ fun ChangePasswordScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            
+
             Spacer(modifier = Modifier.height(20.dp))
-            
+
             // 确认密码
             Text(
                 text = "确认密码",
@@ -1411,11 +1474,11 @@ fun ChangePasswordScreen(
                 color = TextPrimary,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            
+
             var showConfirmPassword by remember { mutableStateOf(false) }
             OutlinedTextField(
                 value = confirmPassword,
-                onValueChange = { 
+                onValueChange = {
                     confirmPassword = it
                     showError = false
                 },
@@ -1441,7 +1504,7 @@ fun ChangePasswordScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            
+
             // 密码不一致提示
             if (confirmPassword.isNotEmpty() && newPassword != confirmPassword) {
                 Text(
@@ -1451,7 +1514,7 @@ fun ChangePasswordScreen(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
-            
+
             // 错误提示
             AnimatedVisibility(visible = showError) {
                 Card(
@@ -1480,9 +1543,9 @@ fun ChangePasswordScreen(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(32.dp))
-            
+
             // 确认修改按钮
             Button(
                 onClick = {
@@ -1525,9 +1588,9 @@ fun ChangePasswordScreen(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // 提示信息
             Text(
                 text = "修改密码后需要重新登录",

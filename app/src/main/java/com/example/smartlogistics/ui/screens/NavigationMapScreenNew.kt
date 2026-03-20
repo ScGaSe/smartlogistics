@@ -54,6 +54,7 @@ import com.amap.api.services.route.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.network.TrafficWebSocket
+import com.example.smartlogistics.utils.SettingsManager
 
 // ==================== 导航步骤数据类 ====================
 data class NavigationStep(
@@ -84,16 +85,21 @@ object LocationCache {
     var lastLocationTime: Long = 0
         private set
 
+    // 演示模式下标记，缓存永不过期
+    var isMockMode: Boolean = false
+
     fun updateLocation(lat: Double, lng: Double) {
         lastLocation = LatLng(lat, lng)
         lastLocationTime = System.currentTimeMillis()
     }
 
     /**
-     * 获取缓存的位置（5分钟内有效）
+     * 获取缓存的位置
+     * 演示模式下永不过期；正常模式下5分钟内有效
      */
     fun getCachedLocation(): LatLng? {
-        val cacheValidDuration = 5 * 60 * 1000L  // 5分钟
+        if (isMockMode) return lastLocation  // 演示模式永不过期
+        val cacheValidDuration = 5 * 60 * 1000L
         return if (System.currentTimeMillis() - lastLocationTime < cacheValidDuration) {
             lastLocation
         } else {
@@ -114,14 +120,29 @@ fun NavigationMapScreenNew(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    // ⭐ 演示模式：注入大兴机场坐标到 LocationCache
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    val isMockMode = settingsManager.mockLocationEnabled
+    LaunchedEffect(isMockMode) {
+        LocationCache.isMockMode = isMockMode
+        if (isMockMode) {
+            LocationCache.updateLocation(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
+        }
+    }
+
     // 地图相关
     var mapView by remember { mutableStateOf<TextureMapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
 
     // 定位相关 - 优先使用缓存位置
-    var currentLocation by remember { mutableStateOf(LocationCache.getCachedLocation()) }
+    var currentLocation by remember {
+        mutableStateOf(
+            if (isMockMode) LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
+            else LocationCache.getCachedLocation()
+        )
+    }
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
-    var hasUsedCachedLocation by remember { mutableStateOf(false) }  // 是否已使用缓存位置移动地图
+    var hasUsedCachedLocation by remember { mutableStateOf(false) }
 
     // 搜索相关
     var searchQuery by remember { mutableStateOf(initialDestination) }
@@ -165,7 +186,7 @@ fun NavigationMapScreenNew(
     var remainingDistance by remember { mutableStateOf(0) }       // 剩余总距离（米）
     var remainingDuration by remember { mutableStateOf(0) }       // 剩余总时间（秒）
     var simulationProgress by remember { mutableStateOf(0f) }     // 当前步骤进度 0-1
-    var isFollowingLocation by remember { mutableStateOf(true) }  // ⭐ 是否跟随定位（用户滑动地图后变为false）
+    var isFollowingLocation by remember { mutableStateOf(!isMockMode) }  // ⭐ 演示模式下不自动跟随
 
     // 模式判断
     val isProfessional = viewModel?.isProfessionalMode() ?: false
@@ -260,15 +281,23 @@ fun NavigationMapScreenNew(
     // 当权限被授予且地图已初始化时，启动定位
     var hasMovedToLocation by remember { mutableStateOf(false) }  // ⭐ 只移动一次
 
-    // ⭐ 地图加载后，如果有缓存位置，立即移动过去（不用等GPS定位）
+    // ⭐ 地图加载后立即定位
     LaunchedEffect(aMap) {
         if (aMap != null && !hasUsedCachedLocation) {
-            val cachedLoc = LocationCache.getCachedLocation()
-            if (cachedLoc != null) {
-                aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(cachedLoc, 15f))
+            if (isMockMode) {
+                // 演示模式：直接飞到大兴航站楼，不依赖缓存
+                val daxing = LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
+                aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(daxing, SettingsManager.DAXING_ZOOM))
+                currentLocation = daxing
                 hasUsedCachedLocation = true
-                hasMovedToLocation = true  // 标记已移动，避免定位成功后重复移动
-                android.util.Log.d("NAV_LOCATION", "使用缓存位置: ${cachedLoc.latitude}, ${cachedLoc.longitude}")
+                hasMovedToLocation = true
+            } else {
+                val cachedLoc = LocationCache.getCachedLocation()
+                if (cachedLoc != null) {
+                    aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(cachedLoc, 15f))
+                    hasUsedCachedLocation = true
+                    hasMovedToLocation = true
+                }
             }
         }
     }
@@ -277,15 +306,20 @@ fun NavigationMapScreenNew(
         if (hasLocationPermission && aMap != null && locationClient == null) {
             setupLocation(context, aMap!!) { client, location ->
                 locationClient = client
-                val newLocation = LatLng(location.latitude, location.longitude)
+
+                // ⭐ 演示模式下：始终用大兴坐标，忽略真实GPS
+                val newLocation = if (isMockMode) {
+                    LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
+                } else {
+                    LatLng(location.latitude, location.longitude)
+                }
                 currentLocation = newLocation
+                LocationCache.updateLocation(newLocation.latitude, newLocation.longitude)
 
-                // ⭐ 更新位置缓存
-                LocationCache.updateLocation(location.latitude, location.longitude)
-
-                // ⭐ 只在没有缓存位置时移动地图（有缓存的话上面已经移动过了）
+                // 只在没有移动过地图时才移动（避免演示模式下重复移动）
                 if (!hasMovedToLocation) {
-                    aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
+                    val zoom = if (isMockMode) SettingsManager.DAXING_ZOOM else 15f
+                    aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, zoom))
                     hasMovedToLocation = true
                 }
             }
@@ -499,7 +533,12 @@ fun NavigationMapScreenNew(
                         if (hasLocationPermission) {
                             setupLocation(ctx, mapObj) { client, location ->
                                 locationClient = client
-                                val newLocation = LatLng(location.latitude, location.longitude)
+                                // ⭐ 演示模式下使用大兴坐标
+                                val newLocation = if (isMockMode) {
+                                    LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
+                                } else {
+                                    LatLng(location.latitude, location.longitude)
+                                }
                                 currentLocation = newLocation
 
                                 // ===== 真实导航模式：根据GPS位置更新导航状态 =====
@@ -883,15 +922,21 @@ fun NavigationMapScreenNew(
                 // 定位按钮（同心圆样式）
                 Surface(
                     onClick = {
-                        if (hasLocationPermission) {
-                            // 有权限，直接定位
+                        if (isMockMode) {
+                            // ⭐ 演示模式：直接飞到大兴机场航站楼
+                            aMap?.animateCamera(
+                                CameraUpdateFactory.newLatLngZoom(
+                                    com.amap.api.maps.model.LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG),
+                                    SettingsManager.DAXING_ZOOM
+                                )
+                            )
+                        } else if (hasLocationPermission) {
                             currentLocation?.let { loc ->
                                 aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(loc, 17f))
                             } ?: run {
                                 Toast.makeText(context, "正在获取位置...", Toast.LENGTH_SHORT).show()
                             }
                         } else {
-                            // 没有权限，请求权限或显示对话框
                             if (permissionDeniedPermanently) {
                                 showPermissionDialog = true
                             } else {
@@ -2024,7 +2069,7 @@ private fun drawAllRoutes(
             val polyline = map.addPolyline(
                 PolylineOptions()
                     .addAll(points)
-                    .width(14f)
+                    .width(13f)
                     .color(unselectedColor)
                     .geodesic(true)
                     .zIndex(1f)

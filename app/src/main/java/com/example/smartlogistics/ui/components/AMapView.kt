@@ -21,6 +21,7 @@ import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.TextureMapView // ★★★ 关键修改：导入 TextureMapView
 import com.amap.api.maps.model.*
 import com.amap.api.maps.AMapOptions
+import com.example.smartlogistics.utils.SettingsManager
 
 /**
  * 高德地图 Compose 组件
@@ -33,7 +34,10 @@ fun AMapView(
     onLocationChanged: ((AMapLocation) -> Unit)? = null,
     showMyLocation: Boolean = true,
     showTraffic: Boolean = true,
-    autoLocateOnStart: Boolean = false,  // 新增：首次定位时自动移动相机到当前位置
+    autoLocateOnStart: Boolean = false,
+    // ⭐ 模拟位置：传入时覆盖真实GPS
+    mockLat: Double? = null,
+    mockLng: Double? = null,
     markers: List<MarkerData> = emptyList(),
     polylinePoints: List<LatLng>? = null,
     polylineColor: Int = Color.BLUE
@@ -167,7 +171,7 @@ fun AMapView(
 
                     // 显示我的位置
                     if (showMyLocation && hasLocationPermission) {
-                        setupMyLocation(ctx, mapObj, locationClient, autoLocateOnStart) { client, location ->
+                        setupMyLocation(ctx, mapObj, locationClient, autoLocateOnStart, mockLat, mockLng) { client, location ->
                             locationClient = client
                             onLocationChanged?.invoke(location)
                         }
@@ -191,7 +195,9 @@ private fun setupMyLocation(
     context: Context,
     map: AMap,
     existingClient: AMapLocationClient?,
-    autoLocateOnStart: Boolean = false,  // 新增：首次定位时自动移动相机
+    autoLocateOnStart: Boolean = false,
+    mockLat: Double? = null,
+    mockLng: Double? = null,
     onLocationResult: (AMapLocationClient, AMapLocation) -> Unit
 ) {
     val myLocationStyle = MyLocationStyle().apply {
@@ -224,14 +230,25 @@ private fun setupMyLocation(
         client.setLocationOption(locationOption)
         client.setLocationListener { location ->
             if (location != null && location.errorCode == 0) {
-                // 首次定位成功且需要自动定位时，移动相机到当前位置
-                if (autoLocateOnStart && isFirstLocation) {
-                    isFirstLocation = false
-                    val latLng = LatLng(location.latitude, location.longitude)
-                    map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
-                    android.util.Log.d("AMapView", "首次定位成功，自动移动到: ${location.latitude}, ${location.longitude}")
+                // ⭐ 如果传入了 mockLat/mockLng，始终用模拟坐标，忽略真实GPS更新
+                if (mockLat != null && mockLng != null) {
+                    location.latitude = mockLat
+                    location.longitude = mockLng
+                    location.address = SettingsManager.DAXING_NAME
+                    // 只在首次调用时移动地图，之后不再自动回位
+                    if (autoLocateOnStart && isFirstLocation) {
+                        isFirstLocation = false
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(mockLat, mockLng), SettingsManager.DAXING_ZOOM))
+                    }
+                } else {
+                    // 真实定位：首次定位时移动相机
+                    if (autoLocateOnStart && isFirstLocation) {
+                        isFirstLocation = false
+                        val latLng = LatLng(location.latitude, location.longitude)
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
+                        android.util.Log.d("AMapView", "首次定位成功，自动移动到: ${location.latitude}, ${location.longitude}")
+                    }
                 }
-
                 onLocationResult(client, location)
             } else {
                 // 打印错误日志

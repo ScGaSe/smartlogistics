@@ -13,47 +13,56 @@ import java.io.FileOutputStream
  * 管理用户本地设置（昵称、头像等）
  */
 class SettingsManager(private val context: Context) {
-    
+
     private val prefs: SharedPreferences = context.getSharedPreferences(
         PREFS_NAME, Context.MODE_PRIVATE
     )
-    
+
     companion object {
         private const val PREFS_NAME = "app_settings"
-        
+
         // 用户设置
         private const val KEY_NICKNAME = "user_nickname"
         private const val KEY_AVATAR_PATH = "user_avatar_path"
-        
+
         // 系统设置
         private const val KEY_AUTO_UPDATE = "auto_update"
-        
+
+        // ⭐ 演示模式 - 模拟位置
+        private const val KEY_MOCK_LOCATION = "mock_location_enabled"
+
+        // 大兴机场航站楼中心坐标（高德GCJ-02坐标系）
+        const val DAXING_LAT = 39.5230
+        const val DAXING_LNG = 116.4050
+        const val DAXING_NAME = "北京大兴国际机场"
+        const val DAXING_ZOOM = 16f  // 16级可以看到完整航站楼
+
         @Volatile
         private var INSTANCE: SettingsManager? = null
-        
+
         fun getInstance(context: Context): SettingsManager {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: SettingsManager(context.applicationContext).also { INSTANCE = it }
             }
         }
     }
-    
+
     // ==================== 用户信息 ====================
-    
+
     /**
      * 保存昵称
      */
     fun saveNickname(nickname: String) {
         prefs.edit().putString(KEY_NICKNAME, nickname).apply()
     }
-    
+
     /**
      * 获取昵称（默认为空）
      */
     fun getNickname(): String? {
         return prefs.getString(KEY_NICKNAME, null)
     }
-    
+
     /**
      * 保存头像（从 Uri 复制到应用私有目录）
      */
@@ -62,14 +71,14 @@ class SettingsManager(private val context: Context) {
             val inputStream = context.contentResolver.openInputStream(uri)
             val bitmap = BitmapFactory.decodeStream(inputStream)
             inputStream?.close()
-            
+
             if (bitmap != null) {
                 val avatarFile = File(context.filesDir, "avatar.jpg")
                 val outputStream = FileOutputStream(avatarFile)
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
                 outputStream.close()
                 bitmap.recycle()
-                
+
                 prefs.edit().putString(KEY_AVATAR_PATH, avatarFile.absolutePath).apply()
                 true
             } else {
@@ -80,7 +89,7 @@ class SettingsManager(private val context: Context) {
             false
         }
     }
-    
+
     /**
      * 获取头像文件路径
      */
@@ -91,7 +100,7 @@ class SettingsManager(private val context: Context) {
         }
         return null
     }
-    
+
     /**
      * 获取头像 Bitmap
      */
@@ -103,25 +112,40 @@ class SettingsManager(private val context: Context) {
             null
         }
     }
-    
+
     // ==================== 系统设置 ====================
-    
+
     var autoUpdate: Boolean
         get() = prefs.getBoolean(KEY_AUTO_UPDATE, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_UPDATE, value).apply()
-    
+
+    // ⭐ 演示模式：模拟位置开关
+    var mockLocationEnabled: Boolean
+        get() = prefs.getBoolean(KEY_MOCK_LOCATION, false)
+        set(value) = prefs.edit().putBoolean(KEY_MOCK_LOCATION, value).apply()
+
+    /**
+     * 获取当前有效纬度
+     * 模拟模式开启时返回大兴机场坐标，否则返回 null（使用真实GPS）
+     */
+    fun getEffectiveLat(realLat: Double?): Double =
+        if (mockLocationEnabled) DAXING_LAT else realLat ?: DAXING_LAT
+
+    fun getEffectiveLng(realLng: Double?): Double =
+        if (mockLocationEnabled) DAXING_LNG else realLng ?: DAXING_LNG
+
     // ==================== 缓存管理 ====================
-    
+
     fun getCacheSize(): String {
         val cacheDir = context.cacheDir
         val externalCacheDir = context.externalCacheDir
-        
+
         var totalSize = getFolderSize(cacheDir)
         externalCacheDir?.let { totalSize += getFolderSize(it) }
-        
+
         return formatFileSize(totalSize)
     }
-    
+
     fun clearCache(): Boolean {
         return try {
             deleteDir(context.cacheDir)
@@ -132,7 +156,7 @@ class SettingsManager(private val context: Context) {
             false
         }
     }
-    
+
     private fun getFolderSize(dir: File?): Long {
         if (dir == null || !dir.exists()) return 0
         var size = 0L
@@ -141,7 +165,7 @@ class SettingsManager(private val context: Context) {
         }
         return size
     }
-    
+
     private fun deleteDir(dir: File?): Boolean {
         if (dir == null || !dir.exists()) return true
         if (dir.isDirectory) {
@@ -149,7 +173,7 @@ class SettingsManager(private val context: Context) {
         }
         return dir.delete()
     }
-    
+
     private fun formatFileSize(size: Long): String {
         return when {
             size < 1024 -> "${size}B"
@@ -158,7 +182,7 @@ class SettingsManager(private val context: Context) {
             else -> String.format("%.1fGB", size / (1024.0 * 1024 * 1024))
         }
     }
-    
+
     fun clearUserSettings() {
         getAvatarPath()?.let { File(it).delete() }
         prefs.edit()
