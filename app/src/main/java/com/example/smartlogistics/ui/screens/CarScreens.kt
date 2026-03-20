@@ -910,9 +910,6 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // 记录停车位置
-                Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                Spacer(modifier = Modifier.height(12.dp))
 
                 // ========== ⭐ 楼层选择（B1/B2/B3）==========
                 Text(text = "停车楼层", fontSize = 13.sp, color = TextSecondary)
@@ -2266,10 +2263,27 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
             segment = selectedSegment!!,
             onDismiss = { showDetailDialog = false },
             onNavigate = { segment ->
-                // 跳转到导航页面，传入目的地名称
-                val encodedDest = Uri.encode(segment.name)
-                navController.navigate("navigation_map?destination=$encodedDest")
                 showDetailDialog = false
+                // 用 gateId 查坐标，走 DIRECT::: 直接传坐标给导航页，绕开高德 POI 搜索
+                scope.launch {
+                    try {
+                        val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+                        }
+                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
+                            val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
+                            val encodedDest = Uri.encode(dest)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        } else {
+                            val encodedDest = Uri.encode(segment.name)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        }
+                    } catch (e: Exception) {
+                        val encodedDest = Uri.encode(segment.name)
+                        navController.navigate("navigation_map?destination=$encodedDest")
+                    }
+                }
             }
         )
     }
@@ -2822,40 +2836,48 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = null) {
-    var selectedTab by remember { mutableStateOf(1) } // 默认选中"本月"
+    var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("本周", "本月", "全部")
 
-    // 获取当前日期用于筛选
+    val context = LocalContext.current
     val currentDate = remember { java.time.LocalDate.now() }
 
-    // 完整的历史数据（模拟更多数据）
-    val allHistoryRecords = remember {
-        listOf(
-            // 本周数据（最近7天）
-            CarHistoryRecord(currentDate.minusDays(0).toString(), "家 → T2航站楼", 28.5, "42分钟", "接人"),
-            CarHistoryRecord(currentDate.minusDays(1).toString(), "T1航站楼 → 万达广场", 15.2, "25分钟", "日常"),
-            CarHistoryRecord(currentDate.minusDays(2).toString(), "公司 → 家", 18.0, "35分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(3).toString(), "家 → 高铁站", 22.3, "38分钟", "送人"),
-            CarHistoryRecord(currentDate.minusDays(4).toString(), "银泰商场 → 家", 12.5, "20分钟", "日常"),
-            CarHistoryRecord(currentDate.minusDays(5).toString(), "家 → 公司", 18.0, "32分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(6).toString(), "机场高速 → 市区", 35.0, "55分钟", "日常"),
-            // 本月数据（7-30天前）
-            CarHistoryRecord(currentDate.minusDays(8).toString(), "家 → 公司", 18.0, "30分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(10).toString(), "超市 → 家", 5.2, "12分钟", "日常"),
-            CarHistoryRecord(currentDate.minusDays(12).toString(), "家 → 医院", 8.5, "18分钟", "其他"),
-            CarHistoryRecord(currentDate.minusDays(15).toString(), "公司 → 家", 18.0, "35分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(18).toString(), "家 → 火车站", 25.0, "40分钟", "送人"),
-            CarHistoryRecord(currentDate.minusDays(20).toString(), "商场 → 家", 10.0, "22分钟", "日常"),
-            CarHistoryRecord(currentDate.minusDays(22).toString(), "家 → 公司", 18.0, "28分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(25).toString(), "机场 → 家", 32.0, "48分钟", "接人"),
-            CarHistoryRecord(currentDate.minusDays(28).toString(), "家 → 公司", 18.0, "33分钟", "通勤"),
-            // 更早的数据（30天以上）
-            CarHistoryRecord(currentDate.minusDays(35).toString(), "家 → 景区", 45.0, "60分钟", "其他"),
-            CarHistoryRecord(currentDate.minusDays(40).toString(), "公司 → 家", 18.0, "30分钟", "通勤"),
-            CarHistoryRecord(currentDate.minusDays(45).toString(), "家 → 高铁站", 22.3, "35分钟", "送人"),
-            CarHistoryRecord(currentDate.minusDays(50).toString(), "朋友家 → 家", 15.0, "25分钟", "日常"),
-            CarHistoryRecord(currentDate.minusDays(60).toString(), "家 → 公司", 18.0, "32分钟", "通勤")
-        )
+    // ⭐ 从真实接口获取出行历史
+    var allHistoryRecords by remember { mutableStateOf<List<CarHistoryRecord>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getTripHistory()
+            }
+            if (resp.isSuccessful && resp.body()?.data?.trips != null) {
+                allHistoryRecords = resp.body()!!.data!!.trips!!.mapNotNull { trip ->
+                    try {
+                        // 从行程单解析日期（createdAt 或 tripDate）
+                        val dateStr = trip.tripDate.ifBlank { trip.createdAt?.take(10) ?: "" }
+                        if (dateStr.isBlank()) return@mapNotNull null
+                        CarHistoryRecord(
+                            date = dateStr,
+                            route = trip.tripNumber,
+                            distance = 0.0,
+                            duration = "-",
+                            tripType = when (trip.tripType) {
+                                "commute" -> "通勤"
+                                "pickup" -> "接人"
+                                "dropoff" -> "送人"
+                                "daily" -> "日常"
+                                else -> trip.tripType
+                            }
+                        )
+                    } catch (e: Exception) { null }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CarHistory", "加载历史失败: ${e.message}")
+        }
+        isLoading = false
     }
 
     // 根据选中的Tab筛选数据
@@ -3073,12 +3095,16 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
         Spacer(modifier = Modifier.height(12.dp))
 
         // 列表内容
-        if (filteredRecords.isEmpty()) {
-            // 空状态
+        if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
+                modifier = Modifier.fillMaxWidth().padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = CarGreen, modifier = Modifier.size(32.dp))
+            }
+        } else if (filteredRecords.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -3089,19 +3115,12 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "暂无出行记录",
-                        color = TextSecondary,
-                        fontSize = 14.sp
-                    )
+                    Text(text = "暂无出行记录", color = TextSecondary, fontSize = 14.sp)
                 }
             }
         } else {
             filteredRecords.forEach { record ->
-                CarHistoryRecordCard(
-                    record = record,
-                    primaryColor = CarGreen
-                )
+                CarHistoryRecordCard(record = record, primaryColor = CarGreen)
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }

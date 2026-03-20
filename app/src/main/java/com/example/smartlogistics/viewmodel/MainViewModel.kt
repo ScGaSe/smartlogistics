@@ -61,6 +61,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _routeResult = MutableStateFlow<RouteResponse?>(null)
     val routeResult: StateFlow<RouteResponse?> = _routeResult.asStateFlow()
 
+    private val _isRoutePlanning = MutableStateFlow(false)
+    val isRoutePlanning: StateFlow<Boolean> = _isRoutePlanning.asStateFlow()
+
+    private val _routeError = MutableStateFlow<String?>(null)
+    val routeError: StateFlow<String?> = _routeError.asStateFlow()
+
     // ==================== AI助手状态 ====================
     private val _aiResponse = MutableStateFlow<AskResponse?>(null)
     val aiResponse: StateFlow<AskResponse?> = _aiResponse.asStateFlow()
@@ -517,21 +523,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ==================== 导航方法 ====================
 
-    fun planRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null) {
+    fun planRoute(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        vehicleId: Int? = null
+    ) {
         viewModelScope.launch {
-            when (val result = repository.planRoute(startPoiId, endPoiId, vehicleId)) {
+            _isRoutePlanning.value = true
+            _routeError.value = null
+            when (val result = repository.planRoute(originLat, originLon, destLat, destLon, vehicleId)) {
                 is NetworkResult.Success -> {
                     _routeResult.value = result.data
                 }
                 is NetworkResult.Error -> {
+                    _routeError.value = result.message
                     Log.e(TAG, "Plan route error: ${result.message}")
                 }
                 is NetworkResult.Exception -> {
+                    _routeError.value = result.throwable.message ?: "网络异常"
                     Log.e(TAG, "Plan route exception: ${result.throwable.message}")
                 }
                 else -> {}
             }
+            _isRoutePlanning.value = false
         }
+    }
+
+    fun clearRouteResult() {
+        _routeResult.value = null
+        _routeError.value = null
     }
 
     // ==================== AI助手方法 ====================

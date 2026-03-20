@@ -1,4 +1,5 @@
 package com.example.smartlogistics.ui.screens
+// BUILD_VERSION: 2026-03-20-v4-TWO-STAGE-SEARCH
 
 import android.Manifest
 import android.content.Context
@@ -54,7 +55,27 @@ import com.amap.api.services.route.*
 import com.example.smartlogistics.ui.theme.*
 import com.example.smartlogistics.viewmodel.MainViewModel
 import com.example.smartlogistics.network.TrafficWebSocket
+import com.example.smartlogistics.network.RouteCoordinate
 import com.example.smartlogistics.utils.SettingsManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+
+// ==================== 统一搜索结果类型（兼容后端POI和高德POI）====================
+/**
+ * 将后端POI和高德PoiItem统一抽象，避免搜索结果列表与数据源耦合。
+ * source = "backend" 时来自内部数据库（闸口/停车场等），"amap" 时来自高德。
+ */
+data class UnifiedPoiResult(
+    val id: String,
+    val name: String,
+    val address: String,
+    val lat: Double,
+    val lng: Double,
+    val source: String,         // "backend" | "amap"
+    val tag: String = ""        // 附加标签，如 "闸口"、"停车场" 等
+)
 
 // ==================== 导航步骤数据类 ====================
 data class NavigationStep(
@@ -93,6 +114,12 @@ object LocationCache {
         lastLocationTime = System.currentTimeMillis()
     }
 
+    // 清空缓存（切换模式时调用，避免旧坐标污染）
+    fun clearCache() {
+        lastLocation = null
+        lastLocationTime = 0
+    }
+
     /**
      * 获取缓存的位置
      * 演示模式下永不过期；正常模式下5分钟内有效
@@ -119,15 +146,18 @@ fun NavigationMapScreenNew(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
 
     // ⭐ 演示模式：注入大兴机场坐标到 LocationCache
     val settingsManager = remember { SettingsManager.getInstance(context) }
     val isMockMode = settingsManager.mockLocationEnabled
-    LaunchedEffect(isMockMode) {
+    // 只在首次进入时同步状态，不清缓存（避免每次进页面都清掉GPS缓存）
+    LaunchedEffect(Unit) {
         LocationCache.isMockMode = isMockMode
         if (isMockMode) {
             LocationCache.updateLocation(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
         }
+        // 不调 clearCache()，让缓存自然过期
     }
 
     // 地图相关
@@ -147,9 +177,10 @@ fun NavigationMapScreenNew(
     // 搜索相关
     var searchQuery by remember { mutableStateOf(initialDestination) }
     var isSearching by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<PoiItem>>(emptyList()) }
+    var searchResults by remember { mutableStateOf<List<UnifiedPoiResult>>(emptyList()) }
     var showSearchResults by remember { mutableStateOf(false) }
-    var selectedPoi by remember { mutableStateOf<PoiItem?>(null) }
+    var selectedPoi by remember { mutableStateOf<PoiItem?>(null) }          // 高德POI（用于高德路线规划）
+    var selectedUnifiedPoi by remember { mutableStateOf<UnifiedPoiResult?>(null) }  // 统一结果（当前选中目的地）
     // ⭐ 直接目的地（用于停车助手等直接传坐标的场景）
     var directDestinationName by remember { mutableStateOf<String?>(null) }
     var directDestinationLatLng by remember { mutableStateOf<LatLng?>(null) }
@@ -166,6 +197,11 @@ fun NavigationMapScreenNew(
     // 地图覆盖物
     var currentMarkers by remember { mutableStateOf<List<Marker>>(emptyList()) }
     var currentPolylines by remember { mutableStateOf<List<Polyline>>(emptyList()) }
+
+    // ==================== 后端A*路线叠加（方案B）====================
+    val backendRouteResult by viewModel?.routeResult?.collectAsState() ?: remember { mutableStateOf(null) }
+    var backendRoutePolylines by remember { mutableStateOf<List<Polyline>>(emptyList()) }
+    var showBackendRouteCard by remember { mutableStateOf(false) }
 
     // UI状态
     var showTraffic by remember { mutableStateOf(true) }
@@ -197,6 +233,33 @@ fun NavigationMapScreenNew(
     val gateQueues by trafficWebSocket.gateQueues.collectAsState()
     val trafficConnectionState by trafficWebSocket.connectionState.collectAsState()
     val lastTrafficUpdate by trafficWebSocket.lastUpdateTime.collectAsState()
+
+    // ⭐ WebSocket 没数据时从 HTTP 接口兜底
+    var httpGateQueues by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var httpGateNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        try {
+            val qResp = withContext(Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGateQueues()
+            }
+            if (qResp.isSuccessful && !qResp.body()?.queues.isNullOrEmpty()) {
+                httpGateQueues = qResp.body()!!.queues!!
+            }
+            val rResp = withContext(Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(
+                    SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG
+                )
+            }
+            if (rResp.isSuccessful && !rResp.body()?.allGates.isNullOrEmpty()) {
+                httpGateNames = rResp.body()!!.allGates!!.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("NavGates", "HTTP闸口兜底失败: ${e.message}")
+        }
+    }
+    // 优先 WebSocket，没数据则用 HTTP
+    val effectiveGateQueues = if (gateQueues.isNotEmpty()) gateQueues else httpGateQueues
+
     var showGatePanel by remember { mutableStateOf(false) }  // 是否显示闸口面板
 
     // 权限
@@ -281,45 +344,44 @@ fun NavigationMapScreenNew(
     // 当权限被授予且地图已初始化时，启动定位
     var hasMovedToLocation by remember { mutableStateOf(false) }  // ⭐ 只移动一次
 
-    // ⭐ 地图加载后立即定位
+    // ⭐ 地图加载后立即定位（不依赖 LocationCache，直接按当前模式决定）
     LaunchedEffect(aMap) {
         if (aMap != null && !hasUsedCachedLocation) {
             if (isMockMode) {
-                // 演示模式：直接飞到大兴航站楼，不依赖缓存
+                // 演示模式：固定飞到大兴航站楼
                 val daxing = LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
                 aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(daxing, SettingsManager.DAXING_ZOOM))
                 currentLocation = daxing
                 hasUsedCachedLocation = true
                 hasMovedToLocation = true
             } else {
-                val cachedLoc = LocationCache.getCachedLocation()
+                // 真实模式：只用 5 分钟内的真实 GPS 缓存，不用演示模式留下的大兴坐标
+                val cachedLoc = if (!LocationCache.isMockMode) LocationCache.getCachedLocation() else null
                 if (cachedLoc != null) {
                     aMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(cachedLoc, 15f))
                     hasUsedCachedLocation = true
                     hasMovedToLocation = true
                 }
+                // 没有真实缓存时什么都不做，等 GPS 定位回调
             }
         }
     }
 
     LaunchedEffect(hasLocationPermission, aMap) {
         if (hasLocationPermission && aMap != null && locationClient == null) {
+            if (isMockMode) {
+                // ⭐ 演示模式：完全不启动GPS定位，避免真实坐标污染缓存
+                // 坐标已在上面的 LaunchedEffect(aMap) 里设置好了
+                return@LaunchedEffect
+            }
             setupLocation(context, aMap!!) { client, location ->
                 locationClient = client
-
-                // ⭐ 演示模式下：始终用大兴坐标，忽略真实GPS
-                val newLocation = if (isMockMode) {
-                    LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
-                } else {
-                    LatLng(location.latitude, location.longitude)
-                }
+                val newLocation = LatLng(location.latitude, location.longitude)
                 currentLocation = newLocation
                 LocationCache.updateLocation(newLocation.latitude, newLocation.longitude)
 
-                // 只在没有移动过地图时才移动（避免演示模式下重复移动）
                 if (!hasMovedToLocation) {
-                    val zoom = if (isMockMode) SettingsManager.DAXING_ZOOM else 15f
-                    aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, zoom))
+                    aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15f))
                     hasMovedToLocation = true
                 }
             }
@@ -366,6 +428,39 @@ fun NavigationMapScreenNew(
             }
 
             // 普通地址走原来的POI搜索逻辑...
+        }
+    }
+
+    // ==================== 监听后端A*路线结果，叠加绘制（方案B）====================
+    LaunchedEffect(backendRouteResult) {
+        val result = backendRouteResult ?: return@LaunchedEffect
+        val coords = result.coordinates
+        if (coords.isNullOrEmpty()) return@LaunchedEffect
+
+        aMap?.let { map ->
+            // 清除旧的A*叠加线
+            backendRoutePolylines.forEach { it.remove() }
+
+            val points = coords.map { LatLng(it.lat, it.lng) }
+
+            // 货车模式用深蓝虚线（区分于高德橙色主路线），私家车用深绿虚线（区分于高德蓝色主路线）
+            val aStarColor = if (isProfessional)
+                AndroidColor.parseColor("#CC1565C0")
+            else
+                AndroidColor.parseColor("#CC2E7D32")
+
+            val aStarPolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(points)
+                    .width(10f)
+                    .color(aStarColor)
+                    .setDottedLine(true)   // 虚线，与高德实线形成视觉区分
+                    .geodesic(true)
+                    .zIndex(20f)           // 最上层，叠加在高德路线之上
+            )
+            backendRoutePolylines = listOf(aStarPolyline)
+            showBackendRouteCard = true
+            android.util.Log.d("ASTAR_ROUTE", "A*路线绘制完成，共 ${points.size} 个坐标点")
         }
     }
 
@@ -418,6 +513,14 @@ fun NavigationMapScreenNew(
                         currentMarkers = listOf(startMarker, endMarker)
                         zoomToRoute(map, paths[0])
                     }
+
+                    // ⭐ 方案B：并联触发后端A*算法路线（直接传经纬度）
+                    viewModel?.planRoute(
+                        originLat = currentLocation!!.latitude,
+                        originLon = currentLocation!!.longitude,
+                        destLat = destLatLng.latitude,
+                        destLon = destLatLng.longitude
+                    )
                 } else {
                     Toast.makeText(context, "路线规划失败，请手动搜索目的地", Toast.LENGTH_LONG).show()
                 }
@@ -438,11 +541,22 @@ fun NavigationMapScreenNew(
             isSearching = true
             searchPoi(context, initialDestination) { results ->
                 isSearching = false
-                searchResults = results
+                // 转换为统一类型
+                searchResults = results.map { p ->
+                    UnifiedPoiResult(
+                        id = p.poiId ?: "",
+                        name = p.title ?: "",
+                        address = p.snippet ?: p.cityName ?: "",
+                        lat = p.latLonPoint.latitude,
+                        lng = p.latLonPoint.longitude,
+                        source = "amap"
+                    )
+                }
 
                 if (results.isNotEmpty()) {
                     val firstPoi = results.first()
                     selectedPoi = firstPoi
+                    selectedUnifiedPoi = searchResults.first()
                     searchQuery = firstPoi.title
                     showSearchResults = false
 
@@ -499,6 +613,14 @@ fun NavigationMapScreenNew(
                             if (paths.size > 1) {
                                 Toast.makeText(context, "找到 ${paths.size} 条路线", Toast.LENGTH_SHORT).show()
                             }
+
+                            // ⭐ 方案B：并联触发后端A*算法路线（直接传经纬度）
+                            viewModel?.planRoute(
+                                originLat = currentLocation!!.latitude,
+                                originLon = currentLocation!!.longitude,
+                                destLat = firstPoi.latLonPoint.latitude,
+                                destLon = firstPoi.latLonPoint.longitude
+                            )
                         } else {
                             Toast.makeText(context, "路线规划失败，请手动搜索", Toast.LENGTH_SHORT).show()
                             showSearchResults = true
@@ -530,15 +652,11 @@ fun NavigationMapScreenNew(
 
                         mapObj.isTrafficEnabled = showTraffic
 
-                        if (hasLocationPermission) {
+                        if (hasLocationPermission && !isMockMode) {
+                            // ⭐ 演示模式下不启动GPS定位，避免真实坐标拉回地图
                             setupLocation(ctx, mapObj) { client, location ->
                                 locationClient = client
-                                // ⭐ 演示模式下使用大兴坐标
-                                val newLocation = if (isMockMode) {
-                                    LatLng(SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG)
-                                } else {
-                                    LatLng(location.latitude, location.longitude)
-                                }
+                                val newLocation = LatLng(location.latitude, location.longitude)
                                 currentLocation = newLocation
 
                                 // ===== 真实导航模式：根据GPS位置更新导航状态 =====
@@ -642,8 +760,9 @@ fun NavigationMapScreenNew(
                             value = searchQuery,
                             onValueChange = {
                                 searchQuery = it
-                                if (selectedPoi != null) {
+                                if (selectedPoi != null || selectedUnifiedPoi != null) {
                                     selectedPoi = null
+                                    selectedUnifiedPoi = null
                                     showRouteInfo = false
                                     routePaths = emptyList()
                                     clearOverlays(currentMarkers, currentPolylines)
@@ -662,6 +781,7 @@ fun NavigationMapScreenNew(
                                         searchResults = emptyList()
                                         showSearchResults = false
                                         selectedPoi = null
+                                        selectedUnifiedPoi = null
                                         showRouteInfo = false
                                         routePaths = emptyList()
                                         clearOverlays(currentMarkers, currentPolylines)
@@ -684,17 +804,108 @@ fun NavigationMapScreenNew(
                         )
 
                         // 搜索按钮
-                        if (searchQuery.isNotBlank() && selectedPoi == null) {
+                        if (searchQuery.isNotBlank() && selectedUnifiedPoi == null) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
                                     isSearching = true
-                                    searchPoi(context, searchQuery) { results ->
-                                        isSearching = false
-                                        searchResults = results
-                                        showSearchResults = results.isNotEmpty()
-                                        if (results.isEmpty()) {
-                                            Toast.makeText(context, "未找到相关地点", Toast.LENGTH_SHORT).show()
+                                    coroutineScope.launch {
+                                        // ① 先查后端：闸口 + 全量POI
+                                        val backendResults = mutableListOf<UnifiedPoiResult>()
+                                        try {
+                                            // ── 闸口搜索 ──
+                                            val gatesResp = withContext(Dispatchers.IO) {
+                                                com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+                                            }
+                                            val allGates = gatesResp.body()?.gates ?: emptyList()
+                                            android.util.Log.d("SEARCH", "后端闸口总数: ${allGates.size}，搜索词: '$searchQuery'")
+                                            allGates.forEach { gate ->
+                                                android.util.Log.d("SEARCH", "  闸口: id='${gate.id}' name='${gate.name}'")
+                                            }
+
+                                            // 把用户输入拆成多个词分别匹配（应对"B37/E37"这种斜杠分隔的情况）
+                                            val keywords = searchQuery
+                                                .split("/", "\\", " ", "、", "，", ",")
+                                                .map { it.trim() }
+                                                .filter { it.isNotBlank() }
+                                            android.util.Log.d("SEARCH", "拆分关键词: $keywords")
+
+                                            allGates.forEach { gate ->
+                                                val nameHit = keywords.any { kw ->
+                                                    gate.name?.contains(kw, ignoreCase = true) == true
+                                                }
+                                                val idHit = keywords.any { kw ->
+                                                    gate.id?.contains(kw, ignoreCase = true) == true
+                                                }
+                                                if (nameHit || idHit) {
+                                                    android.util.Log.d("SEARCH", "  ✅ 命中闸口: ${gate.name}")
+                                                    backendResults.add(UnifiedPoiResult(
+                                                        id = gate.id ?: "",
+                                                        name = gate.name ?: "未知闸口",
+                                                        address = "大兴机场闸口",
+                                                        lat = gate.lat,
+                                                        lng = gate.longitude,
+                                                        source = "backend",
+                                                        tag = "闸口"
+                                                    ))
+                                                }
+                                            }
+
+                                            // ── POI列表搜索 ──
+                                            val poisResp = withContext(Dispatchers.IO) {
+                                                com.example.smartlogistics.network.RetrofitClient.apiService.getPoisList()
+                                            }
+                                            val allPois = poisResp.body() ?: emptyList()
+                                            android.util.Log.d("SEARCH", "后端POI总数: ${allPois.size}")
+                                            allPois.forEach { poi ->
+                                                val nameHit = keywords.any { kw ->
+                                                    poi.name.contains(kw, ignoreCase = true)
+                                                }
+                                                val idHit = keywords.any { kw ->
+                                                    poi.id.contains(kw, ignoreCase = true)
+                                                }
+                                                if (nameHit || idHit) {
+                                                    android.util.Log.d("SEARCH", "  ✅ 命中POI: ${poi.name}")
+                                                    backendResults.add(UnifiedPoiResult(
+                                                        id = poi.id,
+                                                        name = poi.name,
+                                                        address = poi.address ?: poi.type ?: "",
+                                                        lat = poi.lat,
+                                                        lng = poi.lng,
+                                                        source = "backend",
+                                                        tag = poi.type ?: ""
+                                                    ))
+                                                }
+                                            }
+                                            android.util.Log.d("SEARCH", "后端命中总数: ${backendResults.size}")
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("SEARCH", "后端搜索异常: ${e.javaClass.simpleName}: ${e.message}")
+                                        }
+
+                                        if (backendResults.isNotEmpty()) {
+                                            // ② 后端有结果，直接展示
+                                            isSearching = false
+                                            searchResults = backendResults
+                                            showSearchResults = true
+                                        } else {
+                                            // ③ fallback：高德 PoiSearch
+                                            searchPoi(context, searchQuery) { amapResults ->
+                                                isSearching = false
+                                                searchResults = amapResults.map { p ->
+                                                    UnifiedPoiResult(
+                                                        id = p.poiId ?: "",
+                                                        name = p.title ?: "",
+                                                        address = p.snippet ?: p.cityName ?: "",
+                                                        lat = p.latLonPoint.latitude,
+                                                        lng = p.latLonPoint.longitude,
+                                                        source = "amap"
+                                                    )
+                                                }
+                                                showSearchResults = searchResults.isNotEmpty()
+                                                if (searchResults.isEmpty()) {
+                                                    Toast.makeText(context, "未找到相关地点", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
                                         }
                                     }
                                 },
@@ -714,15 +925,18 @@ fun NavigationMapScreenNew(
                         }
 
                         // 规划路线按钮
-                        if (selectedPoi != null && currentLocation != null && !showRouteInfo) {
+                        // 规划路线按钮：selectedUnifiedPoi（统一类型）或 selectedPoi（高德）任一有效即显示
+                        val routeDest = selectedUnifiedPoi
+                        if (routeDest != null && currentLocation != null && !showRouteInfo) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = {
                                     isLoadingRoute = true
+                                    val destLatLng = LatLonPoint(routeDest.lat, routeDest.lng)
                                     searchDriveRoute(
                                         context = context,
                                         start = LatLonPoint(currentLocation!!.latitude, currentLocation!!.longitude),
-                                        end = selectedPoi!!.latLonPoint
+                                        end = destLatLng
                                     ) { paths ->
                                         isLoadingRoute = false
                                         if (paths.isNotEmpty()) {
@@ -730,12 +944,10 @@ fun NavigationMapScreenNew(
                                             selectedRouteIndex = 0
                                             showRouteInfo = true
 
-                                            // 绘制所有路线（选中的高亮，其他灰色）
                                             aMap?.let { map ->
                                                 clearOverlays(currentMarkers, currentPolylines)
                                                 currentPolylines = drawAllRoutes(map, paths, 0, isProfessional)
 
-                                                // 添加起终点标记
                                                 val startMarker = map.addMarker(
                                                     MarkerOptions()
                                                         .position(currentLocation)
@@ -744,20 +956,25 @@ fun NavigationMapScreenNew(
                                                 )
                                                 val endMarker = map.addMarker(
                                                     MarkerOptions()
-                                                        .position(LatLng(selectedPoi!!.latLonPoint.latitude, selectedPoi!!.latLonPoint.longitude))
-                                                        .title(selectedPoi!!.title)
+                                                        .position(LatLng(routeDest.lat, routeDest.lng))
+                                                        .title(routeDest.name)
                                                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                                                 )
                                                 currentMarkers = listOf(startMarker, endMarker)
-
-                                                // 缩放到显示整条路线
                                                 zoomToRoute(map, paths[0])
                                             }
 
-                                            // 显示找到的路线数量
                                             if (paths.size > 1) {
                                                 Toast.makeText(context, "找到 ${paths.size} 条路线", Toast.LENGTH_SHORT).show()
                                             }
+
+                                            // ⭐ 方案B：并联触发后端A*算法路线
+                                            viewModel?.planRoute(
+                                                originLat = currentLocation!!.latitude,
+                                                originLon = currentLocation!!.longitude,
+                                                destLat = routeDest.lat,
+                                                destLon = routeDest.lng
+                                            )
                                         } else {
                                             Toast.makeText(context, "路线规划失败", Toast.LENGTH_SHORT).show()
                                         }
@@ -798,23 +1015,25 @@ fun NavigationMapScreenNew(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            selectedPoi = poi
-                                            searchQuery = poi.title
+                                            selectedUnifiedPoi = poi
+                                            searchQuery = poi.name
                                             showSearchResults = false
+                                            // 高德PoiItem 仅在 amap 来源时才赋值，backend 来源直接用坐标
+                                            selectedPoi = null
 
                                             aMap?.let { map ->
                                                 clearOverlays(currentMarkers, currentPolylines)
                                                 val marker = map.addMarker(
                                                     MarkerOptions()
-                                                        .position(LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude))
-                                                        .title(poi.title)
-                                                        .snippet(poi.snippet)
+                                                        .position(LatLng(poi.lat, poi.lng))
+                                                        .title(poi.name)
+                                                        .snippet(poi.address)
                                                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                                                 )
                                                 currentMarkers = listOf(marker)
                                                 map.animateCamera(
                                                     CameraUpdateFactory.newLatLngZoom(
-                                                        LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude), 15f
+                                                        LatLng(poi.lat, poi.lng), 16f
                                                     )
                                                 )
                                             }
@@ -822,19 +1041,38 @@ fun NavigationMapScreenNew(
                                         .padding(16.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // 后端来源显示专属图标标签
                                     Box(
-                                        modifier = Modifier.size(40.dp).background(primaryColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
+                                        modifier = Modifier.size(40.dp).background(
+                                            if (poi.source == "backend") primaryColor.copy(alpha = 0.18f)
+                                            else primaryColor.copy(alpha = 0.1f),
+                                            RoundedCornerShape(8.dp)
+                                        ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(Icons.Default.LocationOn, null, tint = primaryColor, modifier = Modifier.size(24.dp))
+                                        Icon(
+                                            if (poi.tag == "闸口") Icons.Default.DirectionsCar
+                                            else Icons.Default.LocationOn,
+                                            null, tint = primaryColor, modifier = Modifier.size(24.dp)
+                                        )
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(poi.title ?: "", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(poi.snippet ?: poi.cityName ?: "", fontSize = 13.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    if (poi.distance > 0) {
-                                        Text(formatDistance(poi.distance), fontSize = 12.sp, color = TextTertiary)
+                                        Text(poi.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (poi.source == "backend") {
+                                                Text(
+                                                    if (poi.tag.isNotBlank()) poi.tag else "内部",
+                                                    fontSize = 10.sp,
+                                                    color = primaryColor,
+                                                    modifier = Modifier
+                                                        .background(primaryColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                            }
+                                            Text(poi.address, fontSize = 13.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
                                     }
                                 }
                                 if (poi != searchResults.last()) {
@@ -1197,7 +1435,7 @@ fun NavigationMapScreenNew(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // 闸口列表
-                    if (gateQueues.isEmpty()) {
+                    if (effectiveGateQueues.isEmpty()) {
                         Text(
                             text = if (trafficConnectionState == TrafficWebSocket.ConnectionState.CONNECTED)
                                 "暂无数据" else "等待连接...",
@@ -1207,7 +1445,7 @@ fun NavigationMapScreenNew(
                         )
                     } else {
                         // 按排队数量排序显示
-                        val sortedGates = gateQueues.entries.sortedBy { it.value }
+                        val sortedGates = effectiveGateQueues.entries.sortedBy { it.value }
                         sortedGates.forEach { (gateId, queueCount) ->
                             val gateStatus = trafficWebSocket.getGateStatus(queueCount)
                             val statusColor = when (gateStatus) {
@@ -1222,17 +1460,7 @@ fun NavigationMapScreenNew(
                                 TrafficWebSocket.GateStatus.BUSY -> "繁忙"
                                 TrafficWebSocket.GateStatus.CONGESTED -> "拥堵"
                             }
-                            val gateName = when (gateId) {
-                                "Gate_N1" -> "北1号闸口"
-                                "Gate_N2" -> "北2号闸口"
-                                "Gate_S1" -> "南1号闸口"
-                                "Gate_S2" -> "南2号闸口"
-                                "Gate_E1" -> "东1号闸口"
-                                "Gate_E2" -> "东2号闸口"
-                                "Gate_W1" -> "西1号闸口"
-                                "Gate_W2" -> "西2号闸口"
-                                else -> gateId
-                            }
+                            val gateName = httpGateNames[gateId] ?: "闸口$gateId"
 
                             Row(
                                 modifier = Modifier
@@ -1273,7 +1501,7 @@ fun NavigationMapScreenNew(
 
                         // 推荐闸口
                         val recommendedGate = trafficWebSocket.getRecommendedGate()
-                        if (recommendedGate != null && gateQueues.size > 1) {
+                        if (recommendedGate != null && effectiveGateQueues.size > 1) {
                             Spacer(modifier = Modifier.height(8.dp))
                             HorizontalDivider(color = DividerColor)
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1443,6 +1671,14 @@ fun NavigationMapScreenNew(
 
                                                 zoomToRoute(map, paths[0])
                                             }
+
+                                            // ⭐ 方案B：并联触发后端A*算法路线（直接传经纬度）
+                                            viewModel?.planRoute(
+                                                originLat = start.latitude,
+                                                originLon = start.longitude,
+                                                destLat = poi.latLonPoint.latitude,
+                                                destLon = poi.latLonPoint.longitude
+                                            )
                                         } else {
                                             Toast.makeText(context, "路线规划失败", Toast.LENGTH_SHORT).show()
                                         }
@@ -1492,6 +1728,11 @@ fun NavigationMapScreenNew(
                                 clearOverlays(currentMarkers, currentPolylines)
                                 currentMarkers = emptyList()
                                 currentPolylines = emptyList()
+                                // ⭐ 同时清除A*叠加线
+                                backendRoutePolylines.forEach { it.remove() }
+                                backendRoutePolylines = emptyList()
+                                showBackendRouteCard = false
+                                viewModel?.clearRouteResult()
                             }, modifier = Modifier.size(24.dp)) {
                                 Icon(Icons.Default.Close, "关闭", tint = TextSecondary)
                             }
@@ -1608,6 +1849,56 @@ fun NavigationMapScreenNew(
                             )
                         }
 
+                        // ⭐ 方案B：A*算法约束信息展示
+                        if (showBackendRouteCard && backendRouteResult != null) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            val constraints = backendRouteResult!!.constraintsApplied
+                            val congestionInfo = backendRouteResult!!.congestionInfo
+                            val aStarColor = if (isProfessional)
+                                Color(0xFF1565C0) else Color(0xFF2E7D32)
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = aStarColor.copy(alpha = 0.08f)
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.AltRoute,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp),
+                                            tint = aStarColor
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            "智能算法路线（虚线叠加显示）",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = aStarColor
+                                        )
+                                    }
+                                    if (!constraints.isNullOrEmpty()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            "已规避：${constraints.joinToString("、")}",
+                                            fontSize = 11.sp,
+                                            color = aStarColor.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                    if (!congestionInfo.isNullOrEmpty()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            "拥堵路段：${congestionInfo.entries.take(3).joinToString("、") { "${it.key}(${it.value}级)" }}",
+                                            fontSize = 11.sp,
+                                            color = aStarColor.copy(alpha = 0.75f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Button(
@@ -1637,6 +1928,12 @@ fun NavigationMapScreenNew(
                                     )
 
                                     Toast.makeText(context, "开始导航，请沿路线行驶", Toast.LENGTH_SHORT).show()
+
+                                    // ⭐ 开始导航时清除A*叠加线，避免干扰导航视图
+                                    backendRoutePolylines.forEach { it.remove() }
+                                    backendRoutePolylines = emptyList()
+                                    showBackendRouteCard = false
+                                    viewModel?.clearRouteResult()
                                 } else {
                                     Toast.makeText(context, "请等待定位完成", Toast.LENGTH_SHORT).show()
                                 }

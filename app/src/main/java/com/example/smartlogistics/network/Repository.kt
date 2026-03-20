@@ -685,9 +685,21 @@ class Repository(private val context: Context) {
     /**
      * 路径规划
      */
-    suspend fun planRoute(startPoiId: String, endPoiId: String, vehicleId: Int? = null): NetworkResult<RouteResponse> {
+    suspend fun planRoute(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        vehicleId: Int? = null
+    ): NetworkResult<RouteResponse> {
         return try {
-            val request = RouteRequest(startPoiId, endPoiId, vehicleId)
+            val request = RouteRequest(
+                originLat = originLat,
+                originLon = originLon,
+                destLat = destLat,
+                destLon = destLon,
+                vehicleId = vehicleId
+            )
             val response = api.planRoute(request)
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
@@ -855,18 +867,23 @@ class Repository(private val context: Context) {
     suspend fun getGateQueues(): NetworkResult<GateQueuesResponse> {
         return try {
             val response = api.getGateQueues()
-            if (response.isSuccessful && response.body() != null) {
-                val body = response.body()!!
-                Log.d(TAG, "GateQueues raw: queues=${body.queues}")
-                NetworkResult.Success(body)
+            Log.d(TAG, "GateQueues HTTP code: ${response.code()}, successful: ${response.isSuccessful}")
+            if (response.isSuccessful) {
+                val body = response.body()
+                Log.d(TAG, "GateQueues body null? ${body == null}, queues=${body?.queues}")
+                if (body != null) {
+                    NetworkResult.Success(body)
+                } else {
+                    Log.e(TAG, "GateQueues: body is null after successful response")
+                    NetworkResult.Error("响应体为空")
+                }
             } else {
                 val errBody = response.errorBody()?.string()
                 Log.e(TAG, "GateQueues HTTP ${response.code()}: $errBody")
-                val errorMsg = parseErrorMessage(errBody, "获取闸口数据失败")
-                NetworkResult.Error(errorMsg)
+                NetworkResult.Error(parseErrorMessage(errBody, "获取闸口数据失败"))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Get gate queues error: ${e.message}", e)
+            Log.e(TAG, "Get gate queues EXCEPTION: ${e.javaClass.simpleName}: ${e.message}", e)
             NetworkResult.Exception(e)
         }
     }

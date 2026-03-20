@@ -295,16 +295,26 @@ data class ParkingPrediction(
 // ==================== 导航路线相关 ====================
 
 data class RouteRequest(
-    @SerializedName("start_poi_id") val startPoiId: String,
-    @SerializedName("end_poi_id") val endPoiId: String,
+    @SerializedName("origin_lat") val originLat: Double? = null,
+    @SerializedName("origin_lon") val originLon: Double? = null,
+    @SerializedName("dest_lat") val destLat: Double? = null,
+    @SerializedName("dest_lon") val destLon: Double? = null,
+    @SerializedName("start_poi_id") val startPoiId: String? = null,
+    @SerializedName("end_poi_id") val endPoiId: String? = null,
     @SerializedName("vehicle_id") val vehicleId: Int? = null
+)
+
+data class RouteCoordinate(
+    val lat: Double,
+    val lng: Double
 )
 
 data class RouteResponse(
     val path: List<String>,
     @SerializedName("total_cost") val totalCost: Float? = null,
     @SerializedName("constraints_applied") val constraintsApplied: List<String>? = null,
-    @SerializedName("congestion_info") val congestionInfo: Map<String, Int>? = null
+    @SerializedName("congestion_info") val congestionInfo: Map<String, Int>? = null,
+    val coordinates: List<RouteCoordinate>? = null   // 后端新增：可直接用于地图绘制的经纬度列表
 )
 
 // 兼容旧代码
@@ -372,15 +382,85 @@ data class CongestionPrediction(
 // ==================== 视觉检测相关 ====================
 
 // 严格按照后端 vision_service.py 返回格式定义
+@JsonAdapter(VisionResponseAdapter::class)
 data class VisionResponse(
     val status: String,
-    // license_plate: 对象 {"detected": true, "text": "京A12345"}
     @SerializedName("license_plate") val licensePlate: LicensePlateInfo? = null,
-    // vehicle_type: 对象 {"class": "Truck", "confidence": 0.99}
     @SerializedName("vehicle_type") val vehicleType: VehicleTypeInfo? = null,
-    // hazmat: 经 api_gateway.py 转换后是字符串数组 ["flammable", "toxic"]
     val hazmat: List<String>? = null
 )
+
+// hazmat 可能是 ["oxygen"] 数组，也可能是 {"detected":true,"labels":["oxygen"]} 对象
+class VisionResponseAdapter : com.google.gson.TypeAdapter<VisionResponse>() {
+    private val gson = com.google.gson.GsonBuilder().create()
+
+    override fun write(out: com.google.gson.stream.JsonWriter, value: VisionResponse?) {
+        out.nullValue()
+    }
+
+    override fun read(reader: com.google.gson.stream.JsonReader): VisionResponse {
+        var status = "success"
+        var licensePlate: LicensePlateInfo? = null
+        var vehicleType: VehicleTypeInfo? = null
+        var hazmat: List<String>? = null
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "status" -> status = reader.nextString()
+                "license_plate" -> licensePlate = gson.fromJson(reader, LicensePlateInfo::class.java)
+                "vehicle_type" -> {
+                    // vehicle_type 可能是对象 {"class":"Truck"} 或字符串
+                    when (reader.peek()) {
+                        com.google.gson.stream.JsonToken.BEGIN_OBJECT ->
+                            vehicleType = gson.fromJson(reader, VehicleTypeInfo::class.java)
+                        com.google.gson.stream.JsonToken.STRING -> {
+                            val cls = reader.nextString()
+                            vehicleType = VehicleTypeInfo(vehicleClass = cls)
+                        }
+                        else -> reader.skipValue()
+                    }
+                }
+                "hazmat" -> {
+                    // hazmat 可能是数组 ["oxygen"] 或对象 {"detected":true,"labels":[...]}
+                    hazmat = when (reader.peek()) {
+                        com.google.gson.stream.JsonToken.BEGIN_ARRAY -> {
+                            val list = mutableListOf<String>()
+                            reader.beginArray()
+                            while (reader.hasNext()) list.add(reader.nextString())
+                            reader.endArray()
+                            list
+                        }
+                        com.google.gson.stream.JsonToken.BEGIN_OBJECT -> {
+                            val list = mutableListOf<String>()
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                when (reader.nextName()) {
+                                    "labels", "classes", "types", "items" -> {
+                                        if (reader.peek() == com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+                                            reader.beginArray()
+                                            while (reader.hasNext()) list.add(reader.nextString())
+                                            reader.endArray()
+                                        } else reader.skipValue()
+                                    }
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                            list
+                        }
+                        com.google.gson.stream.JsonToken.STRING -> listOf(reader.nextString())
+                        com.google.gson.stream.JsonToken.NULL -> { reader.nextNull(); null }
+                        else -> { reader.skipValue(); null }
+                    }
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return VisionResponse(status, licensePlate, vehicleType, hazmat)
+    }
+}
 
 data class LicensePlateInfo(
     val detected: Boolean = false,

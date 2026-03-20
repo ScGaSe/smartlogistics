@@ -722,6 +722,15 @@ fun AboutScreen(
                         onCheckedChange = {
                             mockLocationEnabled = it
                             settingsManager.mockLocationEnabled = it
+                            // ⭐ 切换模式时立即更新 LocationCache，清掉旧坐标
+                            com.example.smartlogistics.ui.screens.LocationCache.isMockMode = it
+                            com.example.smartlogistics.ui.screens.LocationCache.clearCache()
+                            if (it) {
+                                com.example.smartlogistics.ui.screens.LocationCache.updateLocation(
+                                    com.example.smartlogistics.utils.SettingsManager.DAXING_LAT,
+                                    com.example.smartlogistics.utils.SettingsManager.DAXING_LNG
+                                )
+                            }
                             Toast.makeText(
                                 context,
                                 if (it) "演示模式已开启，重新进入地图页生效" else "演示模式已关闭",

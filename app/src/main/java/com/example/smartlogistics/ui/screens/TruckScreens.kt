@@ -1056,17 +1056,12 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
 
     // ⭐ 推荐闸口状态
     var recommendedGateId by remember { mutableStateOf<String?>(null) }
+    var recommendedGateName by remember { mutableStateOf<String?>(null) }
     var recommendReason by remember { mutableStateOf<String?>(null) }
 
-    // 闸口名称映射
-    val gateNameMap = mapOf(
-        "Gate_N1" to "北1号闸口",
-        "Gate_N2" to "北2号闸口",
-        "Gate_S1" to "南1号闸口",
-        "Gate_S2" to "南2号闸口",
-        "Gate_E1" to "东1号闸口",
-        "Gate_W1" to "西1号闸口"
-    )
+    // ⭐ 闸口名称从 recommend 接口的 allGates 动态获取，不再硬编码
+    // key = gateId (数字字符串如 "12"), value = 中文名如 "B21/B22闸口"
+    var gateNameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     // 刷新数据 - 调用真实后端API (/traffic/gates)
     val scope = rememberCoroutineScope()
@@ -1081,36 +1076,37 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                 }
                 if (response.isSuccessful && response.body() != null) {
                     val gateData = response.body()!!
-                    // 将闸口数据转换为路段显示
-                    roadSegments = gateData.queues?.map { (gateId, queueCount) ->
-                        val level = when {
-                            queueCount <= 2 -> TruckRoadCongestionLevel.FREE
-                            queueCount <= 5 -> TruckRoadCongestionLevel.LIGHT
-                            queueCount <= 10 -> TruckRoadCongestionLevel.MODERATE
-                            else -> TruckRoadCongestionLevel.SEVERE
-                        }
-                        val description = when (level) {
-                            TruckRoadCongestionLevel.FREE -> "通道畅通，可快速通行"
-                            TruckRoadCongestionLevel.LIGHT -> "排队车辆较少，预计等待5分钟"
-                            TruckRoadCongestionLevel.MODERATE -> "排队车辆较多，预计等待15分钟"
-                            TruckRoadCongestionLevel.SEVERE -> "严重排队，建议选择其他闸口"
-                        }
-                        TruckRoadSegment(
-                            id = gateId,
-                            name = gateNameMap[gateId] ?: gateId,
-                            distance = "-",
-                            estimatedTime = "排队: ${queueCount}辆",
-                            congestionLevel = level,
-                            description = description,
-                            avgSpeed = when (level) {
-                                TruckRoadCongestionLevel.FREE -> "快速通行"
-                                TruckRoadCongestionLevel.LIGHT -> "正常通行"
-                                TruckRoadCongestionLevel.MODERATE -> "缓慢通行"
-                                TruckRoadCongestionLevel.SEVERE -> "拥堵严重"
-                            },
-                            truckRestriction = null
-                        )
-                    }?.sortedBy { it.congestionLevel.ordinal } ?: emptyList()
+                    // 将闸口数据转换为路段显示（过滤掉不认识的key）
+                    roadSegments = gateData.queues
+                        ?.map { (gateId, queueCount) ->
+                            val level = when {
+                                queueCount <= 2 -> TruckRoadCongestionLevel.FREE
+                                queueCount <= 5 -> TruckRoadCongestionLevel.LIGHT
+                                queueCount <= 10 -> TruckRoadCongestionLevel.MODERATE
+                                else -> TruckRoadCongestionLevel.SEVERE
+                            }
+                            val description = when (level) {
+                                TruckRoadCongestionLevel.FREE -> "通道畅通，可快速通行"
+                                TruckRoadCongestionLevel.LIGHT -> "排队车辆较少，预计等待5分钟"
+                                TruckRoadCongestionLevel.MODERATE -> "排队车辆较多，预计等待15分钟"
+                                TruckRoadCongestionLevel.SEVERE -> "严重排队，建议选择其他闸口"
+                            }
+                            TruckRoadSegment(
+                                id = gateId,
+                                name = gateNameMap[gateId] ?: gateId,
+                                distance = "-",
+                                estimatedTime = "排队: ${queueCount}辆",
+                                congestionLevel = level,
+                                description = description,
+                                avgSpeed = when (level) {
+                                    TruckRoadCongestionLevel.FREE -> "快速通行"
+                                    TruckRoadCongestionLevel.LIGHT -> "正常通行"
+                                    TruckRoadCongestionLevel.MODERATE -> "缓慢通行"
+                                    TruckRoadCongestionLevel.SEVERE -> "拥堵严重"
+                                },
+                                truckRestriction = null
+                            )
+                        }?.sortedBy { it.congestionLevel.ordinal } ?: emptyList()
 
                     val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                     lastUpdateTime = sdf.format(java.util.Date())
@@ -1138,9 +1134,19 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                 val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
                     com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(lat, lng)
                 }
+                android.util.Log.d("TruckRoad", "GateRecommend HTTP: ${resp.code()}, body=${resp.body()}")
                 if (resp.isSuccessful && resp.body() != null) {
-                    recommendedGateId = resp.body()!!.recommendedGate
-                    recommendReason = resp.body()!!.reason
+                    val b = resp.body()!!
+                    android.util.Log.d("TruckRoad", "GateRecommend: gate=${b.recommendedGate}, name=${b.recommendedName}, reason=${b.reason}, allGates=${b.allGates}")
+                    recommendedGateId = b.recommendedGate
+                    recommendedGateName = b.recommendedName
+                    recommendReason = b.reason
+                    // ⭐ 用 allGates 动态建立 ID→名称 映射
+                    if (!b.allGates.isNullOrEmpty()) {
+                        gateNameMap = b.allGates.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
+                    }
+                } else {
+                    android.util.Log.e("TruckRoad", "GateRecommend failed: ${resp.code()} ${resp.errorBody()?.string()}")
                 }
             } catch (e: Exception) {
                 android.util.Log.w("TruckRoad", "推荐闸口请求失败: ${e.message}")
@@ -1505,8 +1511,13 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             // ⭐ 推荐闸口提示横幅
                             if (recommendedGateId != null) {
                                 item {
-                                    val recName = roadSegments.find { it.id == recommendedGateId }?.name
-                                        ?: gateNameMap[recommendedGateId] ?: recommendedGateId
+                                    // 优先用API返回的中文名，其次映射表
+                                    val recName = recommendedGateName
+                                        ?: roadSegments.find { it.id == recommendedGateId }?.name
+                                        ?: gateNameMap[recommendedGateId]
+                                        ?: gateNameMap[recommendedGateId?.uppercase()]
+                                    // 如果找不到合法名称（比如后端返回了字段名而非值），跳过不显示
+                                    if (recName == null) return@item
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
@@ -1572,10 +1583,30 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
             segment = selectedSegment!!,
             onDismiss = { showDetailDialog = false },
             onNavigate = { segment ->
-                // 跳转到导航页面，传入目的地名称
-                val encodedDest = Uri.encode(segment.name)
-                navController.navigate("navigation_map?destination=$encodedDest")
                 showDetailDialog = false
+                // 用 gateId 查坐标，走 DIRECT::: 直接传坐标给导航页，绕开高德 POI 搜索
+                scope.launch {
+                    try {
+                        val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+                        }
+                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
+                            // 找到坐标，用 DIRECT::: 格式直接跳转
+                            val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
+                            val encodedDest = Uri.encode(dest)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        } else {
+                            // 没找到坐标，降级用名称搜索
+                            val encodedDest = Uri.encode(segment.name)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        }
+                    } catch (e: Exception) {
+                        // 网络异常，降级用名称搜索
+                        val encodedDest = Uri.encode(segment.name)
+                        navController.navigate("navigation_map?destination=$encodedDest")
+                    }
+                }
             }
         )
     }
@@ -1884,9 +1915,31 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
     val congestionResponse by viewModel?.congestionData?.collectAsState() ?: remember { mutableStateOf(null) }
     val gateQueues by viewModel?.gateQueues?.collectAsState() ?: remember { mutableStateOf(emptyMap()) }
 
+    // ⭐ 闸口名称映射（从 recommend 接口的 allGates 动态获取）
+    var gateNameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        try {
+            val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(
+                    SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG
+                )
+            }
+            if (resp.isSuccessful && !resp.body()?.allGates.isNullOrEmpty()) {
+                gateNameMap = resp.body()!!.allGates!!.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TruckCongestion", "获取闸口名称失败: ${e.message}")
+        }
+    }
+
     var isLoading by remember { mutableStateOf(true) }
     var selectedTimeRange by remember { mutableStateOf("实时") }
     var selectedDataIndex by remember { mutableStateOf(0) }
+
+    // 通道详情弹窗状态
+    val congestionScope = rememberCoroutineScope()
+    var showGateDetailDialog by remember { mutableStateOf(false) }
+    var selectedGateSegment by remember { mutableStateOf<TruckRoadSegment?>(null) }
 
     // ★★★ 根据时间选择计算API参数 ★★★
     val predictHours = when (selectedTimeRange) {
@@ -2098,6 +2151,8 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
                 }
             }
         } else {
+            // ⭐ 直接显示所有闸口，名称从 gateQueues key（数字ID）显示
+            // TruckCongestionScreen 没有 gateNameMap，直接用 key 作为名称兜底
             gateQueues.forEach { (gateName, queueCount) ->
                 val level = when {
                     queueCount == 0 -> CongestionLevel.FREE
@@ -2105,16 +2160,37 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
                     queueCount <= 5 -> CongestionLevel.MODERATE
                     else -> CongestionLevel.SEVERE
                 }
-                val displayName = when (gateName) {
-                    "Gate_N1" -> "北1号闸口"
-                    "Gate_N2" -> "北2号闸口"
-                    "Gate_S1" -> "南1号闸口"
-                    "Gate_E1" -> "东1号闸口"
-                    else -> gateName
-                }
+                // 名称直接用 key（后端返回的是数字，如 "12" → "12号闸口"）
+                val displayName = gateNameMap[gateName] ?: "闸口$gateName"
 
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { navController.navigate("navigation_map") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable {
+                        selectedGateSegment = TruckRoadSegment(
+                            id = gateName,
+                            name = displayName,
+                            distance = "-",
+                            estimatedTime = "排队: ${queueCount}辆",
+                            congestionLevel = when (level) {
+                                CongestionLevel.FREE     -> TruckRoadCongestionLevel.FREE
+                                CongestionLevel.LIGHT    -> TruckRoadCongestionLevel.LIGHT
+                                CongestionLevel.MODERATE -> TruckRoadCongestionLevel.MODERATE
+                                CongestionLevel.SEVERE   -> TruckRoadCongestionLevel.SEVERE
+                            },
+                            description = when (level) {
+                                CongestionLevel.FREE     -> "通道畅通，可快速通行"
+                                CongestionLevel.LIGHT    -> "排队车辆较少，预计等待5分钟"
+                                CongestionLevel.MODERATE -> "排队车辆较多，预计等待15分钟"
+                                CongestionLevel.SEVERE   -> "严重排队，建议选择其他闸口"
+                            },
+                            avgSpeed = when (level) {
+                                CongestionLevel.FREE     -> "快速通行"
+                                CongestionLevel.LIGHT    -> "正常通行"
+                                CongestionLevel.MODERATE -> "缓慢通行"
+                                CongestionLevel.SEVERE   -> "拥堵严重"
+                            }
+                        )
+                        showGateDetailDialog = true
+                    },
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White)
                 ) {
@@ -2144,6 +2220,36 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    // 通道详情弹窗
+    if (showGateDetailDialog && selectedGateSegment != null) {
+        TruckRoadSegmentDetailDialog(
+            segment = selectedGateSegment!!,
+            onDismiss = { showGateDetailDialog = false },
+            onNavigate = { segment ->
+                showGateDetailDialog = false
+                congestionScope.launch {
+                    try {
+                        val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+                        }
+                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
+                            val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
+                            val encodedDest = android.net.Uri.encode(dest)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        } else {
+                            val encodedDest = android.net.Uri.encode(segment.name)
+                            navController.navigate("navigation_map?destination=$encodedDest")
+                        }
+                    } catch (e: Exception) {
+                        val encodedDest = android.net.Uri.encode(segment.name)
+                        navController.navigate("navigation_map?destination=$encodedDest")
+                    }
+                }
+            }
+        )
     }
 }
 
