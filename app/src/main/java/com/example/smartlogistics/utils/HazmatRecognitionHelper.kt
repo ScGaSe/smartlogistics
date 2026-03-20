@@ -52,6 +52,30 @@ class HazmatRecognitionHelper(private val context: Context) {
         fun getClassByCode(code: String): HazmatClass? {
             return HAZMAT_CLASSES.values.find { it.englishName == code }
         }
+
+        /**
+         * 根据 cls 整数索引获取危化品类别（最可靠，直接对应模型输出）
+         */
+        fun getClassByCls(cls: Int): HazmatClass? {
+            return HAZMAT_CLASSES[cls]
+        }
+
+        /**
+         * 根据中文名称获取危化品类别
+         * 后端返回 hazmat_labels 是中文，如"易燃液体"
+         */
+        fun getClassByChinese(chineseName: String): HazmatClass? {
+            return HAZMAT_CLASSES.values.find {
+                it.name == chineseName || it.name.contains(chineseName) || chineseName.contains(it.name)
+            }
+        }
+
+        /**
+         * 通用查找：先英文代码，再中文名，再cls整数
+         */
+        fun getClassByName(name: String): HazmatClass? {
+            return getClassByCode(name) ?: getClassByChinese(name)
+        }
     }
 
     /**

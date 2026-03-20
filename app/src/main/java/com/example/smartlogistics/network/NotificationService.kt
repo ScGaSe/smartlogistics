@@ -133,7 +133,7 @@ class NotificationService private constructor() {
             "${RetrofitClient.getWebSocketBaseUrl()}/ws/user"
         } catch (e: Exception) {
             Log.w(TAG, "RetrofitClient 未初始化，使用默认地址")
-            "ws://192.168.31.4:8000/ws/user"
+            "ws://172.20.10.3:8000/ws/user"
         }
     }
 
@@ -166,7 +166,12 @@ class NotificationService private constructor() {
             return
         }
 
-        val url = "${getWsBaseUrl()}/$userId"
+        val token = try {
+            com.example.smartlogistics.network.TokenManager(applicationContext!!).getToken()
+        } catch (e: Exception) { null }
+
+        val url = "${getWsBaseUrl()}/$userId" +
+                if (!token.isNullOrBlank()) "?token=$token" else ""
         Log.d(TAG, "连接用户通知: $url")
 
         val request = Request.Builder()

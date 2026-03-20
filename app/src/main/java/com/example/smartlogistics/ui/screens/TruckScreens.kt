@@ -1048,6 +1048,10 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
     var loadError by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
+    // ⭐ 推荐闸口状态
+    var recommendedGateId by remember { mutableStateOf<String?>(null) }
+    var recommendReason by remember { mutableStateOf<String?>(null) }
+
     // 闸口名称映射
     val gateNameMap = mapOf(
         "Gate_N1" to "北1号闸口",
@@ -1117,9 +1121,26 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
         }
     }
 
-    // 初始加载数据
+    // ⭐ 30秒轮询：初始加载 + 定时刷新
     LaunchedEffect(Unit) {
-        refreshData()
+        while (true) {
+            refreshData()
+            // 获取推荐闸口（用当前位置，没有位置则用机场中心坐标）
+            try {
+                val lat = currentLocation?.latitude ?: 39.5095
+                val lng = currentLocation?.longitude ?: 116.4105
+                val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(lat, lng)
+                }
+                if (resp.isSuccessful && resp.body() != null) {
+                    recommendedGateId = resp.body()!!.recommendedGate
+                    recommendReason = resp.body()!!.reason
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TruckRoad", "推荐闸口请求失败: ${e.message}")
+            }
+            kotlinx.coroutines.delay(30_000L)
+        }
     }
 
     // 定位到当前位置
@@ -1403,9 +1424,57 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = 16.dp)
                         ) {
-                            items(roadSegments) { segment ->
+                            // ⭐ 推荐闸口提示横幅
+                            if (recommendedGateId != null) {
+                                item {
+                                    val recName = roadSegments.find { it.id == recommendedGateId }?.name
+                                        ?: gateNameMap[recommendedGateId] ?: recommendedGateId
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = TruckOrange.copy(alpha = 0.1f)),
+                                        border = androidx.compose.foundation.BorderStroke(1.5.dp, TruckOrange)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Lightbulb,
+                                                contentDescription = null,
+                                                tint = TruckOrange,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = "推荐前往：$recName",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TruckOrange
+                                                )
+                                                if (!recommendReason.isNullOrBlank()) {
+                                                    Text(
+                                                        text = recommendReason!!,
+                                                        fontSize = 12.sp,
+                                                        color = TextSecondary
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // ⭐ 推荐闸口置顶，其余按原顺序
+                            val sortedSegments = if (recommendedGateId != null) {
+                                roadSegments.sortedByDescending { it.id == recommendedGateId }
+                            } else {
+                                roadSegments
+                            }
+                            items(sortedSegments) { segment ->
                                 TruckRoadSegmentCard(
                                     segment = segment,
+                                    isRecommended = segment.id == recommendedGateId,
                                     onClick = {
                                         selectedSegment = segment
                                         showDetailDialog = true
@@ -1438,6 +1507,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
 @Composable
 private fun TruckRoadSegmentCard(
     segment: TruckRoadSegment,
+    isRecommended: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
@@ -1445,8 +1515,11 @@ private fun TruckRoadSegmentCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isRecommended) TruckOrange.copy(alpha = 0.05f) else Color.White
+        ),
+        border = if (isRecommended) androidx.compose.foundation.BorderStroke(2.dp, TruckOrange) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isRecommended) 4.dp else 1.dp)
     ) {
         Row(
             modifier = Modifier
@@ -1475,9 +1548,25 @@ private fun TruckRoadSegmentCard(
                     Text(
                         text = segment.name,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary
+                        fontWeight = if (isRecommended) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isRecommended) TruckOrange else TextPrimary
                     )
+                    // ⭐ 推荐标签
+                    if (isRecommended) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = TruckOrange
+                        ) {
+                            Text(
+                                text = "推荐",
+                                fontSize = 10.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                     // 货车限制标签
                     segment.truckRestriction?.let { restriction ->
                         Spacer(modifier = Modifier.width(8.dp))
@@ -2584,15 +2673,19 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         }
                     }
 
-                    // 调用后端API识别
+                    // 调用后端API识别危化品
                     when (val result = repository.analyzeVehicleImage(tempFile)) {
                         is com.example.smartlogistics.network.NetworkResult.Success -> {
                             val response = result.data
                             withContext(Dispatchers.Main) {
                                 isHazmatRecognizing = false
-                                if (response.hazmat?.detected == true && response.hazmat.labels?.isNotEmpty() == true) {
-                                    val labelName = response.hazmat.labels.first()
-                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelName)
+                                // hazmat 是 List<String>，如 ["flammable", "toxic"]
+                                val hazmatLabels = response.hazmat
+                                if (!hazmatLabels.isNullOrEmpty()) {
+                                    // 用英文代码查找类别，找不到就用中文兜底
+                                    val labelCode = hazmatLabels.first()
+                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelCode)
+                                        ?: HazmatRecognitionHelper.getClassByChinese(labelCode)
                                     hazmatRecognitionResult = HazmatRecognitionResult(
                                         hazmatClass = hazmatClass,
                                         confidence = 0.9f,
@@ -2646,7 +2739,6 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             isHazmatRecognizing = true
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    // 将Uri转换为临时文件
                     val inputStream = context.contentResolver.openInputStream(hazmatPhotoUri!!)
                     val tempFile = java.io.File(context.cacheDir, "temp_hazmat_camera.jpg")
                     inputStream?.use { input ->
@@ -2655,15 +2747,17 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         }
                     }
 
-                    // 调用后端API识别
                     when (val result = repository.analyzeVehicleImage(tempFile)) {
                         is com.example.smartlogistics.network.NetworkResult.Success -> {
                             val response = result.data
                             withContext(Dispatchers.Main) {
                                 isHazmatRecognizing = false
-                                if (response.hazmat?.detected == true && response.hazmat.labels?.isNotEmpty() == true) {
-                                    val labelName = response.hazmat.labels.first()
-                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelName)
+                                // hazmat 是 List<String>，如 ["flammable", "toxic"]
+                                val hazmatLabels = response.hazmat
+                                if (!hazmatLabels.isNullOrEmpty()) {
+                                    val labelCode = hazmatLabels.first()
+                                    val hazmatClass = HazmatRecognitionHelper.getClassByCode(labelCode)
+                                        ?: HazmatRecognitionHelper.getClassByChinese(labelCode)
                                     hazmatRecognitionResult = HazmatRecognitionResult(
                                         hazmatClass = hazmatClass,
                                         confidence = 0.9f,
@@ -2952,8 +3046,10 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
 
                             // 识别结果显示
                             hazmatRecognitionResult?.let { result ->
-                                result.hazmatClass?.let { hazmatClass ->
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+                                if (result.hazmatClass != null) {
+                                    // ✅ 检测到危化品
+                                    val hazmatClass = result.hazmatClass
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
@@ -2967,7 +3063,6 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                                 .padding(12.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            // 危化品类别图标
                                             Box(
                                                 modifier = Modifier
                                                     .size(40.dp)
@@ -2981,9 +3076,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
-
                                             Spacer(modifier = Modifier.width(12.dp))
-
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = hazmatClass.name,
@@ -2997,13 +3090,41 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                                                     color = TextSecondary
                                                 )
                                             }
-
-                                            // 已识别标识
                                             Icon(
                                                 imageVector = Icons.Rounded.CheckCircle,
                                                 contentDescription = null,
                                                 tint = Color(hazmatClass.colorInt),
                                                 modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // ❌ 未检测到危化品标识
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(TextSecondary.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SearchOff,
+                                            contentDescription = null,
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = "未检测到危化品标识",
+                                                fontSize = 13.sp,
+                                                color = TextSecondary,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = "请确保图片中有清晰的危化品菱形标志",
+                                                fontSize = 11.sp,
+                                                color = TextTertiary
                                             )
                                         }
                                     }

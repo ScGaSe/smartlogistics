@@ -134,7 +134,7 @@ class TrafficWebSocket private constructor() {
         } catch (e: Exception) {
             // RetrofitClient 未初始化时的降级处理
             Log.w(TAG, "RetrofitClient 未初始化，使用默认地址")
-            "ws://192.168.31.4:8000/ws/traffic"
+            "ws://172.20.10.3:8000/ws/traffic"
         }
     }
 

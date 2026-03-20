@@ -615,13 +615,21 @@ class Repository(private val context: Context) {
     /**
      * 注册停车位置（拍照记录）
      */
-    suspend fun registerParkingPhoto(imageFile: File, floor: String? = null, zone: String? = null): NetworkResult<ParkingRegisterResponse> {
+    suspend fun registerParkingPhoto(
+        imageFile: File,
+        floor: String? = null,
+        zone: String? = null,
+        spotCode: String? = null,
+        userId: String? = null
+    ): NetworkResult<ParkingRegisterResponse> {
         return try {
             val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
             val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
             val floorPart = floor?.toRequestBody("text/plain".toMediaTypeOrNull())
             val zonePart = zone?.toRequestBody("text/plain".toMediaTypeOrNull())
-            val response = api.registerParking(body, floorPart, zonePart)
+            val spotCodePart = spotCode?.toRequestBody("text/plain".toMediaTypeOrNull())
+            val userIdPart = userId?.toRequestBody("text/plain".toMediaTypeOrNull())
+            val response = api.registerParking(body, floorPart, zonePart, spotCodePart, userIdPart)
             if (response.isSuccessful && response.body() != null) {
                 NetworkResult.Success(response.body()!!)
             } else {
@@ -749,17 +757,37 @@ class Repository(private val context: Context) {
     suspend fun analyzeVehicleImage(imageFile: File): NetworkResult<VisionResponse> {
         return try {
             val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
-            val body = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
-            val response = api.analyzeVehicle(body)
+            val filePart = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
+            val response = api.analyzeVehicle(filePart)
             if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
+                val result = response.body()!!
+                Log.d(TAG, "VisionResponse: status=${result.status}, " +
+                        "licensePlate=${result.licensePlate?.text}, " +
+                        "vehicleType=${result.vehicleType?.vehicleClass}, " +
+                        "hazmat=${result.hazmat}")
+                NetworkResult.Success(result)
             } else {
-                val errorMsg = parseErrorMessage(response.errorBody()?.string(), "图像分析失败")
-                NetworkResult.Error(errorMsg)
+                val errBody = response.errorBody()?.string()
+                Log.e(TAG, "analyzeVehicle HTTP ${response.code()}: $errBody")
+                NetworkResult.Error(parseErrorMessage(errBody, "图像分析失败"))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Analyze vehicle error: ${e.message}", e)
+            Log.e(TAG, "Analyze vehicle parse error: ${e.message}", e)
+            // 解析失败时拿原始响应体帮助排查
             NetworkResult.Exception(e)
+        }
+    }
+
+    suspend fun analyzeVehicleImageRaw(imageFile: File): String {
+        return try {
+            val requestFile = imageFile.asRequestBody("image/*".toMediaTypeOrNull())
+            val filePart = MultipartBody.Part.createFormData("file", imageFile.name, requestFile)
+            val response = api.analyzeVehicle(filePart)
+            val raw = response.errorBody()?.string() ?: response.body().toString()
+            Log.d(TAG, "RAW vision response: $raw")
+            raw
+        } catch (e: Exception) {
+            "exception: ${e.message}"
         }
     }
 
@@ -828,9 +856,13 @@ class Repository(private val context: Context) {
         return try {
             val response = api.getGateQueues()
             if (response.isSuccessful && response.body() != null) {
-                NetworkResult.Success(response.body()!!)
+                val body = response.body()!!
+                Log.d(TAG, "GateQueues raw: queues=${body.queues}")
+                NetworkResult.Success(body)
             } else {
-                val errorMsg = parseErrorMessage(response.errorBody()?.string(), "获取闸口数据失败")
+                val errBody = response.errorBody()?.string()
+                Log.e(TAG, "GateQueues HTTP ${response.code()}: $errBody")
+                val errorMsg = parseErrorMessage(errBody, "获取闸口数据失败")
                 NetworkResult.Error(errorMsg)
             }
         } catch (e: Exception) {

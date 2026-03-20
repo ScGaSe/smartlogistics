@@ -340,7 +340,10 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var isParkingUploading by remember { mutableStateOf(false) }
     var isGettingLocation by remember { mutableStateOf(false) }
     var isFindingCar by remember { mutableStateOf(false) }
-
+// ========== 楼层和车位号状态 ==========
+    var selectedFloor by remember { mutableStateOf(1) }   // 1=B1, 2=B2, 3=B3
+    var spotCodeInput by remember { mutableStateOf("") }
+    var findCarApiResult by remember { mutableStateOf<com.example.smartlogistics.network.ParkingFindResponse?>(null) }
     // 高德定位客户端
     var locationClient by remember { mutableStateOf<AMapLocationClient?>(null) }
 
@@ -591,7 +594,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
-    // ⭐ 停车拍照（保存到持久化存储）
+    // ⭐ 停车拍照（保存到持久化存储 + 上报后端）
     val parkingCameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
@@ -600,8 +603,25 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 photoUri = parkingPhotoUri,
                 type = "photo"
             )
-            addRecordAndSave(newRecord)  // ⭐ 保存到持久化存储
+            addRecordAndSave(newRecord)
             Toast.makeText(context, "照片已保存", Toast.LENGTH_SHORT).show()
+
+            // ⭐ 异步上报后端（不阻塞UI）
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(parkingPhotoUri!!)
+                    val tempFile = java.io.File(context.cacheDir, "parking_upload.jpg")
+                    inputStream?.use { input -> tempFile.outputStream().use { input.copyTo(it) } }
+                    repository.registerParkingPhoto(
+                        imageFile = tempFile,
+                        floor = selectedFloor.toString(),
+                        spotCode = spotCodeInput.trim().ifBlank { null }
+                    )
+                    tempFile.delete()
+                } catch (e: Exception) {
+                    android.util.Log.e("Parking", "上报停车失败: ${e.message}")
+                }
+            }
         }
     }
 
@@ -616,17 +636,46 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         }
     }
 
-    // ⭐ 寻车拍照（图片匹配）
+    // ⭐ 寻车拍照（调用真实后端接口）
     val findCarCameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
         if (success && findCarPhotoUri != null) {
             isFindingCar = true
             scope.launch {
-                delay(2000) // 模拟匹配
-                isFindingCar = false
-                findCarResult = "匹配成功！与您停车时的照片相似度较高，请查看停车记录确认位置"
-                showFindCarResultDialog = true
+                try {
+                    val inputStream = context.contentResolver.openInputStream(findCarPhotoUri!!)
+                    val tempFile = java.io.File(context.cacheDir, "findcar_upload.jpg")
+                    withContext(Dispatchers.IO) {
+                        inputStream?.use { input -> tempFile.outputStream().use { input.copyTo(it) } }
+                    }
+                    when (val result = withContext(Dispatchers.IO) { repository.findParkingByPhoto(tempFile) }) {
+                        is com.example.smartlogistics.network.NetworkResult.Success -> {
+                            findCarApiResult = result.data
+                            findCarResult = result.data.matchResult?.message
+                                ?: result.data.message
+                                        ?: "匹配完成"
+                            showFindCarResultDialog = true
+                        }
+                        is com.example.smartlogistics.network.NetworkResult.Error -> {
+                            findCarApiResult = null
+                            findCarResult = "匹配失败: ${result.message}"
+                            showFindCarResultDialog = true
+                        }
+                        else -> {
+                            findCarApiResult = null
+                            findCarResult = "网络错误，请重试"
+                            showFindCarResultDialog = true
+                        }
+                    }
+                    tempFile.delete()
+                } catch (e: Exception) {
+                    findCarApiResult = null
+                    findCarResult = "出错: ${e.message}"
+                    showFindCarResultDialog = true
+                } finally {
+                    isFindingCar = false
+                }
             }
         }
     }
@@ -863,7 +912,56 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                 // 记录停车位置
                 Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                 Spacer(modifier = Modifier.height(12.dp))
+// 记录停车位置
+                Text(text = "记录停车位置", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                Spacer(modifier = Modifier.height(12.dp))
 
+// ⭐ 楼层选择
+                Text(text = "停车楼层", fontSize = 13.sp, color = TextSecondary)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf(1 to "B1", 2 to "B2", 3 to "B3").forEach { (floor, label) ->
+                        val isSelected = selectedFloor == floor
+                        Card(
+                            modifier = Modifier.weight(1f).height(44.dp).clickable { selectedFloor = floor },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) CarGreen else CarGreen.copy(alpha = 0.08f)
+                            ),
+                            border = if (isSelected) null else BorderStroke(1.dp, CarGreen.copy(alpha = 0.3f))
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = label,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isSelected) Color.White else CarGreen
+                                )
+                            }
+                        }
+                    }
+                }
+
+// ⭐ 车位号输入
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = spotCodeInput,
+                    onValueChange = { spotCodeInput = it },
+                    placeholder = { Text("车位号，如 A-15（可不填）", color = TextTertiary, fontSize = 13.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CarGreen,
+                        unfocusedBorderColor = BorderLight
+                    ),
+                    leadingIcon = {
+                        Icon(imageVector = Icons.Rounded.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+// 原来的两个操作按钮 Row（标记位置 + 拍照记录）保持不变...
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     // 标记位置
                     Card(
@@ -1195,16 +1293,96 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    val matchResult = findCarApiResult?.matchResult
+                    val isSuccess = findCarApiResult?.status == "success" || matchResult != null
+
                     Box(
-                        modifier = Modifier.size(64.dp).background(Color(0xFF3B82F6).copy(alpha = 0.1f), CircleShape),
+                        modifier = Modifier.size(64.dp).background(
+                            if (isSuccess) Color(0xFF3B82F6).copy(alpha = 0.1f) else ErrorRed.copy(alpha = 0.1f),
+                            CircleShape
+                        ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(40.dp))
+                        Icon(
+                            imageVector = if (isSuccess) Icons.Rounded.CheckCircle else Icons.Rounded.Error,
+                            contentDescription = null,
+                            tint = if (isSuccess) Color(0xFF3B82F6) else ErrorRed,
+                            modifier = Modifier.size(40.dp)
+                        )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = "匹配成功！", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(
+                        text = if (isSuccess) "找到您的车！" else "匹配失败",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = findCarResult ?: "", fontSize = 14.sp, color = TextSecondary, textAlign = TextAlign.Center)
+
+                    // ⭐ 结构化展示楼层/车位号/时间/置信度
+                    if (matchResult != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+                                // 停车位置
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("📍", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text("停车位置", fontSize = 12.sp, color = TextSecondary)
+                                        val floorText = when (matchResult.floor) {
+                                            1 -> "B1层"; 2 -> "B2层"; 3 -> "B3层"
+                                            else -> matchResult.floor?.let { "${it}层" } ?: "—"
+                                        }
+                                        val locationText = when {
+                                            !matchResult.spotCode.isNullOrBlank() -> "$floorText ${matchResult.spotCode}号车位"
+                                            !matchResult.parkingArea.isNullOrBlank() -> matchResult.parkingArea
+                                            else -> floorText
+                                        }
+                                        Text(locationText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                    }
+                                }
+
+                                // 停车时间
+                                if (!matchResult.parkedTime.isNullOrBlank()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("🕐", fontSize = 16.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text("停车时间", fontSize = 12.sp, color = TextSecondary)
+                                            // 格式化时间：取 HH:mm 部分
+                                            val timeDisplay = matchResult.parkedTime
+                                                .substringAfter(" ").substringBeforeLast(":")
+                                                .ifBlank { matchResult.parkedTime }
+                                            Text(timeDisplay, fontSize = 14.sp, color = TextPrimary)
+                                        }
+                                    }
+                                }
+
+                                // 匹配置信度
+                                if (!matchResult.confidence.isNullOrBlank()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("✅", fontSize = 16.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text("匹配置信度", fontSize = 12.sp, color = TextSecondary)
+                                            val confidenceText = when (matchResult.confidence) {
+                                                "high" -> "高"; "medium" -> "中"; "low" -> "低"
+                                                else -> matchResult.confidence
+                                            }
+                                            Text(confidenceText, fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(text = findCarResult ?: "", fontSize = 14.sp, color = TextSecondary, textAlign = TextAlign.Center)
+                    }
 
                     Spacer(modifier = Modifier.height(24.dp))
 

@@ -1,5 +1,6 @@
 package com.example.smartlogistics.network
 
+import com.google.gson.annotations.JsonAdapter
 import com.google.gson.annotations.SerializedName
 
 // ==================== 认证相关 ====================
@@ -370,11 +371,15 @@ data class CongestionPrediction(
 
 // ==================== 视觉检测相关 ====================
 
+// 严格按照后端 vision_service.py 返回格式定义
 data class VisionResponse(
     val status: String,
+    // license_plate: 对象 {"detected": true, "text": "京A12345"}
     @SerializedName("license_plate") val licensePlate: LicensePlateInfo? = null,
+    // vehicle_type: 对象 {"class": "Truck", "confidence": 0.99}
     @SerializedName("vehicle_type") val vehicleType: VehicleTypeInfo? = null,
-    val hazmat: HazmatInfo? = null
+    // hazmat: 经 api_gateway.py 转换后是字符串数组 ["flammable", "toxic"]
+    val hazmat: List<String>? = null
 )
 
 data class LicensePlateInfo(
@@ -385,11 +390,6 @@ data class LicensePlateInfo(
 data class VehicleTypeInfo(
     @SerializedName("class") val vehicleClass: String? = null,
     val confidence: Float? = null
-)
-
-data class HazmatInfo(
-    val detected: Boolean = false,
-    val labels: List<String>? = null
 )
 
 // ==================== 路况相关 ====================
@@ -408,7 +408,26 @@ data class RoadTraffic(
 )
 
 data class GateQueuesResponse(
-    val queues: Map<String, Int>? = null
+    val queues: Map<String, Int>? = null,
+    // 扩展字段：每个闸口的状态（idle/normal/busy）
+    val statuses: Map<String, String>? = null
+)
+
+data class GateRecommendResponse(
+    @SerializedName("recommended_gate") val recommendedGate: String?,
+    @SerializedName("recommended_name") val recommendedName: String?,
+    @SerializedName("estimated_wait_min") val estimatedWaitMin: Int?,
+    val reason: String?,
+    @SerializedName("all_gates") val allGates: List<GateScoreItem>?
+)
+
+data class GateScoreItem(
+    @SerializedName("gate_id") val gateId: String,
+    val name: String?,
+    val score: Float?,
+    @SerializedName("queue_count") val queueCount: Int?,
+    val status: String?,
+    val distance: Int?
 )
 
 // ==================== 历史记录相关 ====================
@@ -463,10 +482,23 @@ data class ParkingDetectedInfo(
 )
 
 data class ParkingFindResponse(
-    val success: Boolean,
+    val status: String?,
+    val success: Boolean = false,
+    @SerializedName("match_result") val matchResult: ParkingMatchResult?,
+    // 旧字段兼容
     @SerializedName("match_confidence") val matchConfidence: Float?,
     val location: ParkingLocationInfo?,
     val navigation: ParkingNavigation?,
+    val message: String?
+)
+
+data class ParkingMatchResult(
+    val distance: Float?,
+    val confidence: String?,   // "high" / "medium" / "low"
+    val floor: Int?,
+    @SerializedName("spot_code") val spotCode: String?,
+    @SerializedName("parking_area") val parkingArea: String?,
+    @SerializedName("parked_time") val parkedTime: String?,
     val message: String?
 )
 
