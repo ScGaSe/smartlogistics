@@ -2337,7 +2337,7 @@ fun CarRoadScreen(navController: NavController, viewModel: MainViewModel? = null
                         val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
                         }
-                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        val gate = gatesResp.body()?.gates?.find { it.id?.toString() == segment.id }
                         if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
                             val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
                             val encodedDest = Uri.encode(dest)
@@ -2624,7 +2624,7 @@ private fun CarTrafficLegendItem(color: Color, label: String) {
 fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? = null) {
     // ★★★ 所有数据从后端获取 ★★★
     val congestionResponse by viewModel?.congestionData?.collectAsState() ?: remember { mutableStateOf(null) }
-    val parkingList by viewModel?.parkingList?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val allParkingList by viewModel?.parkingList?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
 
     var isLoading by remember { mutableStateOf(true) }
     var selectedTimeRange by remember { mutableStateOf("实时") }
@@ -2659,9 +2659,24 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
         isLoading = false
     }
 
-    // ★★★ 初始加载停车场数据（大兴机场中心坐标）★★★
+    // ★★★ 初始加载个人端停车场数据（GET /api/parking/all?role=personal）★★★
     LaunchedEffect(Unit) {
-        viewModel?.fetchNearbyParking(lat = 39.5095, lng = 116.4105, radius = 3000)
+        viewModel?.fetchPersonalParking()
+    }
+
+    // 个人端只显示 P1-P4 旅客停车楼（在 allParkingList 有值后过滤）
+    val passengerKeywords = listOf("P1", "P2", "P3", "P4")
+    val excludeKeywords = listOf("货运", "大巴", "东区", "远端", "航站楼东侧")
+    val parkingList: List<com.example.smartlogistics.network.ParkingInfo> = if (allParkingList.isEmpty()) {
+        emptyList()
+    } else {
+        val filtered = allParkingList.filter { lot ->
+            val nameUpper = lot.name.uppercase()
+            passengerKeywords.any { kw -> nameUpper.contains(kw) } &&
+                    excludeKeywords.none { ex -> lot.name.contains(ex) }
+        }
+        // 若过滤结果为空（后端命名完全不含P1-P4），则回退显示全部，避免白屏
+        filtered.ifEmpty { allParkingList }
     }
 
     // 后端返回的拥堵预测数据转换为UI格式

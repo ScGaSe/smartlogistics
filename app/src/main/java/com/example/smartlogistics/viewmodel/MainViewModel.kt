@@ -675,6 +675,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+
+    /**
+     * 获取个人端旅客停车场（P1-P4）
+     * 主接口：GET /api/parking/all?role=personal
+     * 降级：GET /parking/nearby（旧接口）
+     */
+    fun fetchPersonalParking() {
+        viewModelScope.launch {
+            Log.d(TAG, "fetchPersonalParking: 开始请求 /parking/all?role=personal")
+            when (val result = repository.getPersonalParkingAll()) {
+                is NetworkResult.Success -> {
+                    Log.d(TAG, "fetchPersonalParking: 成功，数量=${result.data.size}，数据=${result.data.map { it.name }}")
+                    _parkingList.value = result.data
+                }
+                is NetworkResult.Error -> {
+                    Log.e(TAG, "fetchPersonalParking: 接口返回错误=${result.message}，降级到 /parking/nearby")
+                    // 新接口不通，降级到旧接口
+                    fallbackToNearbyParking()
+                }
+                is NetworkResult.Exception -> {
+                    Log.e(TAG, "fetchPersonalParking: 网络异常=${result.throwable.message}，降级到 /parking/nearby")
+                    // 网络异常，降级到旧接口
+                    fallbackToNearbyParking()
+                }
+                else -> {}
+            }
+        }
+    }
+
+    /** 降级方案：用旧的 /parking/nearby 接口兜底 */
+    private suspend fun fallbackToNearbyParking() {
+        Log.d(TAG, "fallbackToNearbyParking: 请求 /parking/nearby lat=39.5095 lng=116.4105")
+        when (val result = repository.getNearbyParking(lat = 39.5095, lng = 116.4105, radius = 3000)) {
+            is NetworkResult.Success -> {
+                Log.d(TAG, "fallbackToNearbyParking: 成功，数量=${result.data.size}，数据=${result.data.map { it.name }}")
+                _parkingList.value = result.data
+            }
+            is NetworkResult.Error -> {
+                Log.e(TAG, "fallbackToNearbyParking: 也失败了=${result.message}")
+            }
+            is NetworkResult.Exception -> {
+                Log.e(TAG, "fallbackToNearbyParking: 异常=${result.throwable.message}")
+            }
+            else -> {}
+        }
+    }
+
     fun predictParking(lotId: String, hours: Int = 3) {
         viewModelScope.launch {
             when (val result = repository.predictParking(lotId, hours)) {

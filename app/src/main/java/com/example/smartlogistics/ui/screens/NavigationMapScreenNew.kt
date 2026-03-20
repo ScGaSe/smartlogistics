@@ -236,22 +236,26 @@ fun NavigationMapScreenNew(
 
     // ⭐ WebSocket 没数据时从 HTTP 接口兜底
     var httpGateQueues by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    // 名称映射：从 /pois/gates 获取完整57个闸口名称（id→name）
     var httpGateNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(Unit) {
         try {
+            // 第一步：从 /pois/gates 建立完整名称映射（57个）
+            val gatesResp = withContext(Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+            }
+            if (gatesResp.isSuccessful && !gatesResp.body()?.gates.isNullOrEmpty()) {
+                httpGateNames = gatesResp.body()!!.gates!!
+                    .filter { it.id != null && it.name != null }
+                    .associate { it.id.toString() to it.name!! }
+                android.util.Log.d("NavGates", "名称映射已建立，共${httpGateNames.size}个闸口")
+            }
+            // 第二步：获取排队数据
             val qResp = withContext(Dispatchers.IO) {
                 com.example.smartlogistics.network.RetrofitClient.apiService.getGateQueues()
             }
             if (qResp.isSuccessful && !qResp.body()?.queues.isNullOrEmpty()) {
                 httpGateQueues = qResp.body()!!.queues!!
-            }
-            val rResp = withContext(Dispatchers.IO) {
-                com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(
-                    SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG
-                )
-            }
-            if (rResp.isSuccessful && !rResp.body()?.allGates.isNullOrEmpty()) {
-                httpGateNames = rResp.body()!!.allGates!!.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
             }
         } catch (e: Exception) {
             android.util.Log.w("NavGates", "HTTP闸口兜底失败: ${e.message}")
@@ -835,12 +839,12 @@ fun NavigationMapScreenNew(
                                                     gate.name?.contains(kw, ignoreCase = true) == true
                                                 }
                                                 val idHit = keywords.any { kw ->
-                                                    gate.id?.contains(kw, ignoreCase = true) == true
+                                                    gate.idStr.contains(kw, ignoreCase = true)
                                                 }
                                                 if (nameHit || idHit) {
                                                     android.util.Log.d("SEARCH", "  ✅ 命中闸口: ${gate.name}")
                                                     backendResults.add(UnifiedPoiResult(
-                                                        id = gate.id ?: "",
+                                                        id = gate.idStr,
                                                         name = gate.name ?: "未知闸口",
                                                         address = "大兴机场闸口",
                                                         lat = gate.lat,
@@ -1387,14 +1391,14 @@ fun NavigationMapScreenNew(
             exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it }),
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 80.dp, end = 70.dp)
+                .padding(top = 80.dp, end = 70.dp, bottom = 120.dp)
                 .statusBarsPadding()
         ) {
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.widthIn(min = 180.dp, max = 220.dp)
+                modifier = Modifier.width(240.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     // 标题栏
@@ -1444,56 +1448,62 @@ fun NavigationMapScreenNew(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
                     } else {
-                        // 按排队数量排序显示
+                        // 按排队数量排序显示，可滚动（57个闸口）
                         val sortedGates = effectiveGateQueues.entries.sortedBy { it.value }
-                        sortedGates.forEach { (gateId, queueCount) ->
-                            val gateStatus = trafficWebSocket.getGateStatus(queueCount)
-                            val statusColor = when (gateStatus) {
-                                TrafficWebSocket.GateStatus.SMOOTH -> Color(0xFF4CAF50)    // 绿色-畅通
-                                TrafficWebSocket.GateStatus.NORMAL -> Color(0xFF8BC34A)    // 浅绿-正常
-                                TrafficWebSocket.GateStatus.BUSY -> Color(0xFFFFC107)      // 黄色-繁忙
-                                TrafficWebSocket.GateStatus.CONGESTED -> Color(0xFFE57373) // 红色-拥堵
-                            }
-                            val statusText = when (gateStatus) {
-                                TrafficWebSocket.GateStatus.SMOOTH -> "畅通"
-                                TrafficWebSocket.GateStatus.NORMAL -> "正常"
-                                TrafficWebSocket.GateStatus.BUSY -> "繁忙"
-                                TrafficWebSocket.GateStatus.CONGESTED -> "拥堵"
-                            }
-                            val gateName = httpGateNames[gateId] ?: "闸口$gateId"
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 400.dp),
+                            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp)
+                        ) {
+                            items(sortedGates) { (gateId, queueCount) ->
+                                val gateStatus = trafficWebSocket.getGateStatus(queueCount)
+                                val statusColor = when (gateStatus) {
+                                    TrafficWebSocket.GateStatus.SMOOTH -> Color(0xFF4CAF50)
+                                    TrafficWebSocket.GateStatus.NORMAL -> Color(0xFF8BC34A)
+                                    TrafficWebSocket.GateStatus.BUSY -> Color(0xFFFFC107)
+                                    TrafficWebSocket.GateStatus.CONGESTED -> Color(0xFFE57373)
+                                }
+                                val statusText = when (gateStatus) {
+                                    TrafficWebSocket.GateStatus.SMOOTH -> "畅通"
+                                    TrafficWebSocket.GateStatus.NORMAL -> "正常"
+                                    TrafficWebSocket.GateStatus.BUSY -> "繁忙"
+                                    TrafficWebSocket.GateStatus.CONGESTED -> "拥堵"
+                                }
+                                val gateName = httpGateNames[gateId] ?: "闸口$gateId"
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = gateName,
-                                    fontSize = 13.sp,
-                                    color = TextPrimary
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    // 排队数量
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "${queueCount}辆",
-                                        fontSize = 12.sp,
-                                        color = TextSecondary
+                                        text = gateName,
+                                        fontSize = 13.sp,
+                                        color = TextPrimary,
+                                        modifier = Modifier.weight(1f)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    // 状态标签
-                                    Box(
-                                        modifier = Modifier
-                                            .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = statusText,
-                                            fontSize = 11.sp,
-                                            color = statusColor,
-                                            fontWeight = FontWeight.Medium
+                                            text = "${queueCount}辆",
+                                            fontSize = 12.sp,
+                                            color = TextSecondary
                                         )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = statusText,
+                                                fontSize = 11.sp,
+                                                color = statusColor,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 }
                             }

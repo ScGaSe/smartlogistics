@@ -576,19 +576,49 @@ data class TripHistory(
     @SerializedName("created_at") val createdAt: String? = null
 )
 
+
+// ==================== 个人端停车场接口模型 ====================
+// 后端实际返回结构：
+// { "status":"success", "parking_lots": { "parking_xxx": { "lot_id","available","capacity","name","lat","lng","role" } } }
+
+data class PersonalParkingItem(
+    @SerializedName("lot_id") val lotId: String = "",
+    val name: String = "",
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val capacity: Int = 0,           // 总车位
+    val available: Int = 0,          // 剩余车位
+    val status: String? = null,
+    val role: String = ""            // "personal" 或 "professional"
+)
+
+// GET /api/parking/all?role=personal
+// parking_lots 是 Map<id, item>，不是数组
+data class PersonalParkingAllResponse(
+    val status: String? = null,
+    @SerializedName("parking_lots") val parkingLots: Map<String, PersonalParkingItem>? = null
+)
+
+// GET /api/parking/best?role=personal
+data class PersonalParkingBestResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val data: PersonalParkingItem? = null
+)
 // ==================== 闸口和停车场 POI ====================
 
 data class GatePoiItem(
-    val id: String? = null,
+    val id: Int? = null,           // 后端返回整数 id（1-57）
     val name: String? = null,
     val lat: Double = 0.0,
-    // 后端可能用 lon 或 lng，两个都兼容
     val lon: Double? = null,
     val lng: Double? = null,
+    val ref: String? = null,       // 如 "B37/E37"
     val status: String? = null,
     @SerializedName("queue_count") val queueCount: Int? = null
 ) {
     val longitude: Double get() = lon ?: lng ?: 0.0
+    val idStr: String get() = id?.toString() ?: ""
 }
 
 data class GatesResponse(

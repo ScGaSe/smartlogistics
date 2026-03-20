@@ -594,6 +594,49 @@ class Repository(private val context: Context) {
         }
     }
 
+
+    /**
+     * 获取个人端旅客停车场列表（P1-P4）
+     * GET /api/parking/all?role=personal
+     * 后端返回：{ "status":"success", "parking_lots": { id: { lot_id, name, available, capacity, role, ... } } }
+     * 前端只取 role=="personal" 的条目
+     */
+    suspend fun getPersonalParkingAll(): NetworkResult<List<ParkingInfo>> {
+        return try {
+            Log.d(TAG, "getPersonalParkingAll: 发起请求")
+            val response = api.getPersonalParkingAll()
+            Log.d(TAG, "getPersonalParkingAll: HTTP ${response.code()} isSuccessful=${response.isSuccessful}")
+            if (response.isSuccessful && response.body() != null) {
+                val lotsMap = response.body()!!.parkingLots ?: emptyMap()
+                Log.d(TAG, "getPersonalParkingAll: 总停车场数量=${lotsMap.size}")
+                // 只取 role=="personal" 的条目，转换为通用 ParkingInfo
+                val parkings = lotsMap.values
+                    .filter { it.role == "personal" }
+                    .map { item ->
+                        ParkingInfo(
+                            id = item.lotId,
+                            name = item.name,
+                            lat = item.lat,
+                            lng = item.lng,
+                            totalSpots = item.capacity,
+                            availableSpots = item.available,
+                            price = "5元/小时"
+                        )
+                    }
+                Log.d(TAG, "getPersonalParkingAll: personal停车场数量=${parkings.size}，名称=${parkings.map { it.name }}")
+                NetworkResult.Success(parkings)
+            } else {
+                val errBody = response.errorBody()?.string()
+                Log.e(TAG, "getPersonalParkingAll: 失败 HTTP=${response.code()} errBody=$errBody")
+                val errorMsg = parseErrorMessage(errBody, "获取停车场列表失败")
+                NetworkResult.Error(errorMsg)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getPersonalParkingAll: 异常 ${e.message}", e)
+            NetworkResult.Exception(e)
+        }
+    }
+
     /**
      * 停车预测
      */
@@ -868,9 +911,12 @@ class Repository(private val context: Context) {
         return try {
             val response = api.getGateQueues()
             Log.d(TAG, "GateQueues HTTP code: ${response.code()}, successful: ${response.isSuccessful}")
+            // ★ 打印原始JSON，确认后端key格式
+            val rawJson = try { response.raw().peekBody(Long.MAX_VALUE).string() } catch (ex: Exception) { "peek失败" }
+            Log.d(TAG, "GateQueues rawJSON=$rawJson")
             if (response.isSuccessful) {
                 val body = response.body()
-                Log.d(TAG, "GateQueues body null? ${body == null}, queues=${body?.queues}")
+                Log.d(TAG, "GateQueues body null? ${body == null}, queues=${body?.queues}, keys=${body?.queues?.keys}")
                 if (body != null) {
                     NetworkResult.Success(body)
                 } else {

@@ -398,4 +398,25 @@ interface ApiService {
      */
     @GET("pois/parking")
     suspend fun getParkingLots(): Response<ParkingLotsResponse>
+
+    // ==================== 个人端停车场（新接口）====================
+
+    /**
+     * 获取个人端所有停车场（P1-P4）
+     * GET /api/parking/all?role=personal
+     */
+    @GET("parking/all")
+    suspend fun getPersonalParkingAll(
+        @Query("role") role: String = "personal"
+    ): Response<PersonalParkingAllResponse>
+
+    /**
+     * 获取个人端推荐停车场（空位最多）
+     * GET /api/parking/best?role=personal
+     */
+    @GET("parking/best")
+    suspend fun getPersonalParkingBest(
+        @Query("role") role: String = "personal"
+    ): Response<PersonalParkingBestResponse>
+
 }

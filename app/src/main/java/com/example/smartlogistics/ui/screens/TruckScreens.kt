@@ -1059,8 +1059,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
     var recommendedGateName by remember { mutableStateOf<String?>(null) }
     var recommendReason by remember { mutableStateOf<String?>(null) }
 
-    // ⭐ 闸口名称从 recommend 接口的 allGates 动态获取，不再硬编码
-    // key = gateId (数字字符串如 "12"), value = 中文名如 "B21/B22闸口"
+    // ⭐ 闸口名称映射：从 /pois/gates 获取完整57个闸口名称，key为数字字符串如 "12"
     var gateNameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     // 刷新数据 - 调用真实后端API (/traffic/gates)
@@ -1091,9 +1090,13 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                                 TruckRoadCongestionLevel.MODERATE -> "排队车辆较多，预计等待15分钟"
                                 TruckRoadCongestionLevel.SEVERE -> "严重排队，建议选择其他闸口"
                             }
+                            // gateId可能是数字字符串，统一toString后查映射
+                            val resolvedName = gateNameMap[gateId.toString()]
+                                ?: gateNameMap[gateId]
+                                ?: gateId
                             TruckRoadSegment(
                                 id = gateId,
-                                name = gateNameMap[gateId] ?: gateId,
+                                name = resolvedName,
                                 distance = "-",
                                 estimatedTime = "排队: ${queueCount}辆",
                                 congestionLevel = level,
@@ -1123,11 +1126,27 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
         }
     }
 
-    // ⭐ 30秒轮询：初始加载 + 定时刷新
+    // ⭐ 一次性加载：从 /pois/gates 建立完整57个闸口名称映射
+    LaunchedEffect(Unit) {
+        try {
+            val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
+            }
+            if (resp.isSuccessful && !resp.body()?.gates.isNullOrEmpty()) {
+                gateNameMap = resp.body()!!.gates!!
+                    .filter { it.id != null && it.name != null }
+                    .associate { it.id.toString() to it.name!! }
+                android.util.Log.d("TruckRoad", "gateNameMap 已建立，共${gateNameMap.size}个闸口")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TruckRoad", "加载闸口名称失败: ${e.message}")
+        }
+    }
+
+    // ⭐ 30秒轮询：获取排队数据 + 推荐闸口
     LaunchedEffect(Unit) {
         while (true) {
-            refreshData()
-            // 获取推荐闸口（用当前位置，没有位置则用机场中心坐标）
+            // 第一步：获取推荐闸口
             try {
                 val lat = currentLocation?.latitude ?: 39.5095
                 val lng = currentLocation?.longitude ?: 116.4105
@@ -1137,20 +1156,18 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                 android.util.Log.d("TruckRoad", "GateRecommend HTTP: ${resp.code()}, body=${resp.body()}")
                 if (resp.isSuccessful && resp.body() != null) {
                     val b = resp.body()!!
-                    android.util.Log.d("TruckRoad", "GateRecommend: gate=${b.recommendedGate}, name=${b.recommendedName}, reason=${b.reason}, allGates=${b.allGates}")
+                    android.util.Log.d("TruckRoad", "GateRecommend: gate=${b.recommendedGate}, name=${b.recommendedName}, reason=${b.reason}")
                     recommendedGateId = b.recommendedGate
                     recommendedGateName = b.recommendedName
                     recommendReason = b.reason
-                    // ⭐ 用 allGates 动态建立 ID→名称 映射
-                    if (!b.allGates.isNullOrEmpty()) {
-                        gateNameMap = b.allGates.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
-                    }
                 } else {
                     android.util.Log.e("TruckRoad", "GateRecommend failed: ${resp.code()} ${resp.errorBody()?.string()}")
                 }
             } catch (e: Exception) {
                 android.util.Log.w("TruckRoad", "推荐闸口请求失败: ${e.message}")
             }
+            // 第二步：获取排队数据（此时 gateNameMap 已就绪，名称能正确显示）
+            refreshData()
             kotlinx.coroutines.delay(30_000L)
         }
     }
@@ -1270,8 +1287,8 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                                             map.addMarker(
                                                 com.amap.api.maps.model.MarkerOptions()
                                                     .position(pos)
-                                                    .title(gate.name ?: gate.id ?: "闸口")
-                                                    .snippet(gate.id ?: "")
+                                                    .title(gate.name ?: gate.idStr.ifEmpty { "闸口" })
+                                                    .snippet(gate.idStr)
                                             )
                                         }
                                         // 点击 Marker 显示排队信息
@@ -1590,7 +1607,7 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                         val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
                         }
-                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        val gate = gatesResp.body()?.gates?.find { it.id?.toString() == segment.id }
                         if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
                             // 找到坐标，用 DIRECT::: 格式直接跳转
                             val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
@@ -1915,17 +1932,18 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
     val congestionResponse by viewModel?.congestionData?.collectAsState() ?: remember { mutableStateOf(null) }
     val gateQueues by viewModel?.gateQueues?.collectAsState() ?: remember { mutableStateOf(emptyMap()) }
 
-    // ⭐ 闸口名称映射（从 recommend 接口的 allGates 动态获取）
+    // ⭐ 闸口名称映射：从 /pois/gates 获取完整57个闸口名称（id→name）
     var gateNameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(Unit) {
         try {
             val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.smartlogistics.network.RetrofitClient.apiService.getGateRecommend(
-                    SettingsManager.DAXING_LAT, SettingsManager.DAXING_LNG
-                )
+                com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
             }
-            if (resp.isSuccessful && !resp.body()?.allGates.isNullOrEmpty()) {
-                gateNameMap = resp.body()!!.allGates!!.associate { it.gateId to (it.name ?: "闸口${it.gateId}") }
+            if (resp.isSuccessful && !resp.body()?.gates.isNullOrEmpty()) {
+                gateNameMap = resp.body()!!.gates!!
+                    .filter { it.id != null && it.name != null }
+                    .associate { it.id.toString() to it.name!! }
+                android.util.Log.d("TruckCongestion", "gateNameMap 已建立，共${gateNameMap.size}个闸口")
             }
         } catch (e: Exception) {
             android.util.Log.w("TruckCongestion", "获取闸口名称失败: ${e.message}")
@@ -2161,7 +2179,9 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
                     else -> CongestionLevel.SEVERE
                 }
                 // 名称直接用 key（后端返回的是数字，如 "12" → "12号闸口"）
-                val displayName = gateNameMap[gateName] ?: "闸口$gateName"
+                val displayName = gateNameMap[gateName.toString()]
+                    ?: gateNameMap[gateName]
+                    ?: "闸口$gateName"
 
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable {
@@ -2234,7 +2254,7 @@ fun TruckCongestionScreen(navController: NavController, viewModel: MainViewModel
                         val gatesResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.example.smartlogistics.network.RetrofitClient.apiService.getGates()
                         }
-                        val gate = gatesResp.body()?.gates?.find { it.id == segment.id }
+                        val gate = gatesResp.body()?.gates?.find { it.id?.toString() == segment.id }
                         if (gate != null && gate.lat != 0.0 && gate.longitude != 0.0) {
                             val dest = "DIRECT:::${segment.name}:::${gate.lat}:::${gate.longitude}"
                             val encodedDest = android.net.Uri.encode(dest)
