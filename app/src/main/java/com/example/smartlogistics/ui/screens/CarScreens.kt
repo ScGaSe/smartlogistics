@@ -269,6 +269,34 @@ private fun StatusBadge(text: String, backgroundColor: Color, textColor: Color) 
 
 
 // ==================== 🚗 智能停车助手 ====================
+// ==================== 大兴机场真实停车场数据 ====================
+
+data class DaxingParkingLot(
+    val id: String,
+    val name: String,
+    val lat: Double,
+    val lng: Double
+)
+
+val DAXING_PARKING_LOTS = listOf(
+    // 旅客停车楼（航站楼周边400-500米，个人模式主要用这四个）
+    DaxingParkingLot("parking_729741308", "P1停车楼",   39.513487, 116.408482),
+    DaxingParkingLot("parking_866594532", "P3停车楼",   39.512394, 116.405988),
+    DaxingParkingLot("parking_729741309", "P2停车楼",   39.513819, 116.411901),
+    DaxingParkingLot("parking_866594521", "P4停车楼",   39.512831, 116.414236),
+    // 大巴停车场
+    DaxingParkingLot("parking_814584240", "大巴车停车场", 39.519962, 116.401873),
+    // 货运区停车场（专业模式货车司机用）
+    DaxingParkingLot("parking_979737264", "货运区西北停车场", 39.525873, 116.400618),
+    DaxingParkingLot("parking_979772799", "货运区北停车场",   39.525817, 116.420025),
+    DaxingParkingLot("parking_979772878", "货运区东停车场A",  39.521467, 116.429975),
+    DaxingParkingLot("parking_979772880", "货运区东停车场B",  39.522438, 116.430295),
+    DaxingParkingLot("parking_979772882", "货运区东停车场C",  39.522483, 116.433767),
+    DaxingParkingLot("parking_979772801", "东区货运停车场A",  39.523782, 116.450132),
+    DaxingParkingLot("parking_979772802", "东区货运停车场B",  39.524371, 116.450729),
+    DaxingParkingLot("parking_1201726894", "航站楼东侧停车场", 39.510000, 116.428403),
+)
+
 // ==================== 在 CarBindScreen 函数之前添加数据类 ====================
 
 data class ParkingRecord(
@@ -340,6 +368,7 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var findCarPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var isParkingUploading by remember { mutableStateOf(false) }
     var isGettingLocation by remember { mutableStateOf(false) }
+    var triggerParkingCamera by remember { mutableStateOf(false) }
     var isFindingCar by remember { mutableStateOf(false) }
 
     // ========== 楼层和车位号状态 ==========
@@ -407,15 +436,35 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
 
             client.setLocationListener { location ->
                 if (location != null && location.errorCode == 0) {
-                    // ⭐ 尝试多个字段获取地址
+
+                    // ⭐ 识别最近的停车场
+                    fun distanceMeter(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float {
+                        val results = FloatArray(1)
+                        android.location.Location.distanceBetween(lat1, lng1, lat2, lng2, results)
+                        return results[0]
+                    }
+
+                    val nearest = DAXING_PARKING_LOTS.minByOrNull {
+                        distanceMeter(location.latitude, location.longitude, it.lat, it.lng)
+                    }
+                    val nearestDist = nearest?.let {
+                        distanceMeter(location.latitude, location.longitude, it.lat, it.lng)
+                    } ?: Float.MAX_VALUE
+
+                    // 400米内认为在该停车场
+                    val detectedLot = if (nearestDist < 400f) nearest else null
+
+                    // 拼接完整地址：停车场名 + 楼层 + 车位号
+                    val floorLabel = when (selectedFloor) { 1 -> "B1层"; 2 -> "B2层"; else -> "B3层" }
                     val address = when {
+                        detectedLot != null -> {
+                            val spot = spotCodeInput.trim()
+                            if (spot.isNotBlank()) "${detectedLot.name} $floorLabel ${spot}号车位"
+                            else "${detectedLot.name} $floorLabel"
+                        }
                         !location.address.isNullOrBlank() -> location.address
                         !location.poiName.isNullOrBlank() -> location.poiName
                         !location.aoiName.isNullOrBlank() -> location.aoiName
-                        !location.street.isNullOrBlank() -> {
-                            "${location.district ?: ""}${location.street ?: ""}${location.streetNum ?: ""}"
-                        }
-                        !location.district.isNullOrBlank() -> location.district
                         else -> "停车位置"
                     }
 
@@ -427,7 +476,16 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     )
                     addRecordAndSave(record)
                     isGettingLocation = false
-                    Toast.makeText(context, "位置已标记", Toast.LENGTH_SHORT).show()
+
+                    // Toast 告诉用户识别到了哪里
+                    val msg = if (detectedLot != null)
+                        "✅ 已标记：$address"
+                    else
+                        "位置已标记（距已知停车场较远）"
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+
+                    // 自动触发拍照（通过状态变量，避免前向引用问题）
+                    triggerParkingCamera = true
                 } else {
                     isGettingLocation = false
                     Toast.makeText(context, "定位失败: ${location?.errorInfo ?: "未知错误"}", Toast.LENGTH_SHORT).show()
@@ -726,6 +784,15 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
             parkingPhotoUri?.let { parkingCameraLauncher.launch(it) }
         } else {
             parkingCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+
+    // 监听定位完成后自动触发拍照
+    LaunchedEffect(triggerParkingCamera) {
+        if (triggerParkingCamera) {
+            triggerParkingCamera = false
+            kotlinx.coroutines.delay(300)
+            launchParkingCamera()
         }
     }
 
@@ -2563,6 +2630,11 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
     var selectedTimeRange by remember { mutableStateOf("实时") }
     var selectedDataIndex by remember { mutableStateOf(0) }
 
+    // 停车场详情弹窗状态
+    val parkingScope = rememberCoroutineScope()
+    var showParkingDialog by remember { mutableStateOf(false) }
+    var selectedParking by remember { mutableStateOf<com.example.smartlogistics.network.ParkingInfo?>(null) }
+
     // ★★★ 根据时间选择计算API参数 ★★★
     val hoursOffset = when (selectedTimeRange) {
         "实时" -> 0
@@ -2788,7 +2860,15 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
                 }
             }
         } else {
-            parkingList.forEach { parking ->
+            // 空位最多的停车场作为推荐，排到第一位
+            val recommendedParking = parkingList.maxByOrNull { it.availableSpots }
+            val sortedParkingList = if (recommendedParking != null) {
+                listOf(recommendedParking) + parkingList.filter { it.id != recommendedParking.id }
+            } else {
+                parkingList
+            }
+
+            sortedParkingList.forEach { parking ->
                 val occupancyRate = if (parking.totalSpots > 0) 1f - (parking.availableSpots.toFloat() / parking.totalSpots) else 0f
                 val level = when {
                     occupancyRate < 0.5f -> CongestionLevel.FREE
@@ -2796,31 +2876,77 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
                     occupancyRate < 0.9f -> CongestionLevel.MODERATE
                     else -> CongestionLevel.SEVERE
                 }
+                val isRecommended = parking.id == recommendedParking?.id
 
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { navController.navigate("navigation_map") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable {
+                            selectedParking = parking
+                            showParkingDialog = true
+                        },
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isRecommended) CarGreenLight else Color.White
+                    ),
+                    border = if (isRecommended) androidx.compose.foundation.BorderStroke(1.5.dp, CarGreen) else null,
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (isRecommended) 4.dp else 1.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Rounded.LocalParking, contentDescription = null, tint = CarGreen, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(text = parking.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                                Text(text = "空位: ${parking.availableSpots}/${parking.totalSpots} · ${parking.price}", fontSize = 12.sp, color = TextSecondary)
+                    Column {
+                        if (isRecommended) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CarGreen, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                                    .padding(horizontal = 16.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Star, null, Modifier.size(14.dp), tint = Color.White)
+                                Spacer(Modifier.width(4.dp))
+                                Text("推荐停车场", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
                             }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(shape = RoundedCornerShape(8.dp), color = level.color.copy(alpha = 0.15f)) {
-                                Text(text = level.label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = level.color)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.LocalParking,
+                                    contentDescription = null,
+                                    tint = if (isRecommended) CarGreen else CarGreen.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = parking.name,
+                                        fontSize = 15.sp,
+                                        fontWeight = if (isRecommended) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "空位: ${parking.availableSpots}/${parking.totalSpots} · ${parking.price ?: "-"}",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(20.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(shape = RoundedCornerShape(8.dp), color = level.color.copy(alpha = 0.15f)) {
+                                    Text(
+                                        text = level.label,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = level.color
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
                 }
@@ -2829,8 +2955,136 @@ fun CarCongestionScreen(navController: NavController, viewModel: MainViewModel? 
 
         Spacer(modifier = Modifier.height(24.dp))
     }
+
+    // 停车场详情弹窗
+    if (showParkingDialog && selectedParking != null) {
+        val parking = selectedParking!!
+        val occupancyRate = if (parking.totalSpots > 0) 1f - (parking.availableSpots.toFloat() / parking.totalSpots) else 0f
+        val level = when {
+            occupancyRate < 0.5f -> CongestionLevel.FREE
+            occupancyRate < 0.7f -> CongestionLevel.LIGHT
+            occupancyRate < 0.9f -> CongestionLevel.MODERATE
+            else -> CongestionLevel.SEVERE
+        }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showParkingDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    // 标题栏
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("停车场详情", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        IconButton(onClick = { showParkingDialog = false }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Close, "关闭", tint = TextSecondary)
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+
+                    // 停车场名称 + 状态
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).background(level.color, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text(parking.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                    }
+                    Spacer(Modifier.height(16.dp))
+
+                    // 详情信息行
+                    ParkingDetailInfoRow("当前状态", level.label, level.color)
+                    ParkingDetailInfoRow("剩余空位", "${parking.availableSpots} / ${parking.totalSpots} 个")
+                    ParkingDetailInfoRow("停车收费", parking.price ?: "暂无信息")
+                    if (parking.distance > 0) {
+                        ParkingDetailInfoRow("距离", "${parking.distance}m")
+                    }
+                    if (parking.predictedAvailable != null) {
+                        ParkingDetailInfoRow("预测空位(1h后)", "${parking.predictedAvailable} 个")
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // 提示
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = CarGreenLight,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Rounded.Info, null, tint = CarGreen, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = when (level) {
+                                    CongestionLevel.FREE     -> "停车场空位充足，可直接前往"
+                                    CongestionLevel.LIGHT    -> "空位较少，建议提前前往"
+                                    CongestionLevel.MODERATE -> "停车位紧张，建议考虑其他停车场"
+                                    CongestionLevel.SEVERE   -> "车位已近满，强烈建议选择其他停车场"
+                                },
+                                fontSize = 14.sp, color = TextSecondary, lineHeight = 20.sp
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    // 导航按钮
+                    Button(
+                        onClick = {
+                            showParkingDialog = false
+                            val lat = parking.lat
+                            val lng = parking.lng
+                            if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                                // 有坐标，直接用 DIRECT::: 格式跳转
+                                val dest = "DIRECT:::${parking.name}:::$lat:::$lng"
+                                val encodedDest = android.net.Uri.encode(dest)
+                                navController.navigate("navigation_map?destination=$encodedDest")
+                            } else {
+                                // 无坐标：查本地 DAXING_PARKING_LOTS 静态数据表，id 精确匹配
+                                parkingScope.launch {
+                                    val staticLot = DAXING_PARKING_LOTS.find { it.id == parking.id }
+                                        ?: DAXING_PARKING_LOTS.find { it.name == parking.name }
+                                    if (staticLot != null) {
+                                        val dest = "DIRECT:::${parking.name}:::${staticLot.lat}:::${staticLot.lng}"
+                                        val encodedDest = android.net.Uri.encode(dest)
+                                        navController.navigate("navigation_map?destination=$encodedDest")
+                                    } else {
+                                        // 静态表没有则加"大兴机场"前缀防止高德搜到其他城市
+                                        val encodedDest = android.net.Uri.encode("大兴机场${parking.name}")
+                                        navController.navigate("navigation_map?destination=$encodedDest")
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = CarGreen),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Navigation, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("开始导航", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
 }
 
+
+// 停车场详情信息行
+@Composable
+private fun ParkingDetailInfoRow(label: String, value: String, valueColor: Color = TextPrimary) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 14.sp, color = TextSecondary)
+        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = valueColor)
+    }
+    HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
+}
 
 // ==================== 历史数据页面 ====================
 @OptIn(ExperimentalMaterial3Api::class)
