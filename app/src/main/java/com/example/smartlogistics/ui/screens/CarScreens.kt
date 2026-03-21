@@ -81,12 +81,12 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
 // 私家车版支持的选项: sedan(轿车), suv(SUV), bus(客车), minibus(小型客车)
 private fun mapVehicleTypeToCarOption(vehicleType: String?): String {
     return when (vehicleType?.lowercase()) {
-        "sedan", "car" -> "sedan"              // 轿车 -> 轿车
-        "suv" -> "suv"                         // SUV -> SUV
-        "bus" -> "bus"                         // 客车 -> 客车
-        "minibus", "van" -> "minibus"          // 小型客车、面包车 -> 小型客车
-        "truck", "pickup" -> "bus"             // 货车、皮卡 -> 客车（大型）
-        else -> "sedan"                        // 默认选择轿车
+        "sedan", "car" -> "轿车"              // 轿车 -> 轿车
+        "suv" -> "SUV"                         // SUV -> SUV
+        "bus" -> "客车"                         // 客车 -> 客车
+        "minibus", "van" -> "小型客车"          // 小型客车、面包车 -> 小型客车
+        "truck", "pickup" -> " 客车（大型）"             // 货车、皮卡 -> 客车（大型）
+        else -> "轿车"                        // 默认选择轿车
     }
 }
 
@@ -372,7 +372,11 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
     var isFindingCar by remember { mutableStateOf(false) }
 
     // ========== 楼层和车位号状态 ==========
-    var selectedFloor by remember { mutableStateOf(1) }   // 1=B1, 2=B2, 3=B3
+    // 手动选择停车楼（GPS自动识别兜底，用户可手动覆盖）
+    var selectedLotId by remember { mutableStateOf<String?>(null) }
+    val selectedLotName by remember(selectedLotId) { mutableStateOf(DAXING_PARKING_LOTS.find { it.id == selectedLotId }?.name ?: "") }
+    // 真实楼层：大兴机场停车楼实际为地上3层+地下1层
+    var selectedFloor by remember { mutableStateOf("") }   // "B1层"/"1层"/"1M层"/"2层"
     var spotCodeInput by remember { mutableStateOf("") }
     var findCarApiResult by remember { mutableStateOf<com.example.smartlogistics.network.ParkingFindResponse?>(null) }
 
@@ -454,13 +458,23 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                     // 400米内认为在该停车场
                     val detectedLot = if (nearestDist < 400f) nearest else null
 
-                    // 拼接完整地址：停车场名 + 楼层 + 车位号
-                    val floorLabel = when (selectedFloor) { 1 -> "B1层"; 2 -> "B2层"; else -> "B3层" }
+                    // 拼接完整地址：停车楼名 + 楼层 + 车位号
+                    // 停车楼：优先用用户手动选择，否则用GPS自动识别结果
+                    val lotName = if (selectedLotName.isNotBlank()) selectedLotName else detectedLot?.name
+                    // 同步更新手动选择状态（GPS识别到时自动填入）
+                    if (selectedLotId == null && detectedLot != null) {
+                        selectedLotId = detectedLot.id
+                    }
+                    val floorLabel = selectedFloor
                     val address = when {
-                        detectedLot != null -> {
+                        lotName != null -> {
                             val spot = spotCodeInput.trim()
-                            if (spot.isNotBlank()) "${detectedLot.name} $floorLabel ${spot}号车位"
-                            else "${detectedLot.name} $floorLabel"
+                            val parts = listOfNotNull(
+                                lotName,
+                                floorLabel.ifBlank { null },
+                                if (spot.isNotBlank()) "${spot}号车位" else null
+                            )
+                            parts.joinToString(" ")
                         }
                         !location.address.isNullOrBlank() -> location.address
                         !location.poiName.isNullOrBlank() -> location.poiName
@@ -978,14 +992,45 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
 
-                // ========== ⭐ 楼层选择（B1/B2/B3）==========
+                // ========== 停车楼选择（P1/P2/P3/P4）==========
+                Text(text = "停车楼", fontSize = 13.sp, color = TextSecondary)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DAXING_PARKING_LOTS.filter { it.id in setOf("parking_729741308","parking_729741309","parking_866594532","parking_866594521") }
+                        .sortedBy { it.name }
+                        .forEach { lot ->
+                            val isSelected = selectedLotId == lot.id
+                            Card(
+                                modifier = Modifier.weight(1f).height(44.dp).clickable { selectedLotId = lot.id },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) CarGreen else CarGreen.copy(alpha = 0.08f)
+                                ),
+                                border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, CarGreen.copy(alpha = 0.3f))
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = lot.name.replace("停车楼", ""),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected) Color.White else CarGreen
+                                    )
+                                }
+                            }
+                        }
+                }
+
+                // ========== 楼层选择（大兴机场真实楼层：B1/1层/1M层/2层）==========
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(text = "停车楼层", fontSize = 13.sp, color = TextSecondary)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf(1 to "B1", 2 to "B2", 3 to "B3").forEach { (floor, label) ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("B1层", "1层", "1M层", "2层").forEach { floor ->
                         val isSelected = selectedFloor == floor
                         Card(
-                            modifier = Modifier.weight(1f).height(44.dp).clickable { selectedFloor = floor },
+                            modifier = Modifier.weight(1f).height(44.dp).clickable {
+                                selectedFloor = if (selectedFloor == floor) "" else floor
+                            },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isSelected) CarGreen else CarGreen.copy(alpha = 0.08f)
@@ -994,8 +1039,8 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = label,
-                                    fontSize = 15.sp,
+                                    text = floor,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = if (isSelected) Color.White else CarGreen
                                 )

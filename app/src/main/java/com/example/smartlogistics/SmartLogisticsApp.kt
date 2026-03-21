@@ -2,6 +2,7 @@ package com.example.smartlogistics
 
 import android.app.Application
 import com.example.smartlogistics.network.RetrofitClient
+import com.example.smartlogistics.network.OppoPushManager
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.services.core.ServiceSettings
 /**
@@ -27,8 +28,9 @@ class SmartLogisticsApp : Application() {
         ServiceSettings.updatePrivacyShow(this, true, true)
         ServiceSettings.updatePrivacyAgree(this, true)
 
-        // key
-       // ServiceSettings.getInstance().setApiKey("25c3f3c88fd0f3a407d7261c1f09301d")
+        // 初始化 OPPO 推送（SDK aar 导入后自动生效）
+        // 注册成功后自动获取 registerId 并上报给后端
+        OppoPushManager.init(this)
     }
 }
 

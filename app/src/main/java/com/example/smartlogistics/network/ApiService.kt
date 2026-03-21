@@ -427,4 +427,17 @@ interface ApiService {
     @GET("pois/warehouses")
     suspend fun getWarehouses(): Response<WarehousesResponse>
 
+
+    // ==================== OPPO 推送 ====================
+
+    /**
+     * 上报设备推送 registerId
+     * POST /push/register
+     * 后端用此 registerId 向该设备发送 OPPO 推送通知
+     */
+    @POST("push/register")
+    suspend fun uploadPushRegisterId(
+        @Body request: PushRegisterRequest
+    ): Response<PushRegisterResponse>
+
 }

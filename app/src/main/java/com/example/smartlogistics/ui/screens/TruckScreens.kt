@@ -84,10 +84,10 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
 // 货车版支持的选项: truck(卡车), van(小型货车)
 private fun mapVehicleTypeToTruckOption(vehicleType: String?): String {
     return when (vehicleType?.lowercase()) {
-        "truck", "pickup" -> "truck"           // 卡车、皮卡 -> 卡车
-        "van", "minibus" -> "van"              // 面包车、小型客车 -> 小型货车
-        "bus" -> "truck"                       // 客车 -> 卡车（大型）
-        else -> "truck"                        // 默认选择卡车
+        "truck", "pickup" -> "卡车"           // 卡车、皮卡 -> 卡车
+        "van", "minibus" -> "小型货车"              // 面包车、小型客车 -> 小型货车
+        "bus" -> "卡车"                       // 客车 -> 卡车（大型）
+        else -> "卡车"                        // 默认选择卡车
     }
 }
 
