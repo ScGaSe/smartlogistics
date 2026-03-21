@@ -107,6 +107,7 @@ fun LoginScreen(
                 val userId = userInfo?.id ?: 1
                 NotificationService.getInstance().connect(userId)
 
+
                 navController.navigate(targetHome) {
                     popUpTo("login") { inclusive = true }
                 }
