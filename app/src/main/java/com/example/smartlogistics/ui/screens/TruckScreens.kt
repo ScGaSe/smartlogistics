@@ -84,10 +84,10 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
 // 货车版支持的选项: truck(卡车), van(小型货车)
 private fun mapVehicleTypeToTruckOption(vehicleType: String?): String {
     return when (vehicleType?.lowercase()) {
-        "truck", "pickup" -> "卡车"           // 卡车、皮卡 -> 卡车
-        "van", "minibus" -> "小型货车"              // 面包车、小型客车 -> 小型货车
-        "bus" -> "卡车"                       // 客车 -> 卡车（大型）
-        else -> "卡车"                        // 默认选择卡车
+        "truck", "pickup" -> "truck"           // 卡车、皮卡 -> 卡车
+        "van", "minibus" -> "van"              // 面包车、小型客车 -> 小型货车
+        "bus" -> "truck"                       // 客车 -> 卡车（大型）
+        else -> "truck"                        // 默认卡车
     }
 }
 
@@ -123,10 +123,14 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
         )
 
         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            val pendingReport = reports.firstOrNull { it.status == "pending" }
-            if (pendingReport != null) {
+            val pendingCount = reports.count { it.status == "pending" }
+            if (pendingCount > 0) {
                 item {
-                    PendingTaskCard(title = "待处理报备", description = "您有1条货物报备待确认", onClick = { navController.navigate("cargo_report") })
+                    PendingTaskCard(
+                        title = "待处理报备",
+                        description = "您有${pendingCount}条货物报备待确认",
+                        onClick = { navController.navigate("truck_history") }  // 跳到历史记录查看
+                    )
                 }
             }
 
@@ -153,7 +157,7 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             rowItems.forEach { item ->
                                 Box(modifier = Modifier.weight(1f)) {
-                                    FeatureCard(title = item.title, icon = item.icon, primaryColor = TruckOrange, badge = if (item.route == "cargo_report" && pendingReport != null) "1" else null, onClick = { navController.navigate(item.route) })
+                                    FeatureCard(title = item.title, icon = item.icon, primaryColor = TruckOrange, badge = if (item.route == "cargo_report") { val cnt = reports.count { it.status == "pending" }; if (cnt > 0) cnt.toString() else null } else null, onClick = { navController.navigate(item.route) })
                                 }
                             }
                             if (rowItems.size == 1) Spacer(modifier = Modifier.weight(1f))
@@ -172,7 +176,16 @@ fun TruckHomeScreen(navController: NavController, viewModel: MainViewModel? = nu
                     EmptyState(icon = Icons.Rounded.Assignment, title = "暂无报备记录", subtitle = "完成首次货物报备后将显示在这里", actionText = "去报备", onAction = { navController.navigate("cargo_report") })
                 }
             } else {
-                items(reports.take(3)) { report -> RecentReportCard(report = report) }
+                val warehouseIdToName = mapOf(
+                    "warehouse_814584217" to "BCS国内货运营业厅",
+                    "warehouse_814584219" to "中国南航北京分公司货物",
+                    "warehouse_814584220" to "东航物流",
+                    "warehouse_814584221" to "大兴南航国际货站",
+                    "warehouse_814584222" to "大兴国际机场BCS国际货运站",
+                    "warehouse_814584223" to "北京大兴国际机场海关货运综合楼",
+                    "warehouse_10012544018" to "机场货运区"
+                )
+                items(reports.take(3)) { report -> RecentReportCard(report = report, navController = navController, idToName = warehouseIdToName) }
             }
 
             item { Spacer(modifier = Modifier.height(80.dp)) }
@@ -196,8 +209,17 @@ private fun PendingTaskCard(title: String, description: String, onClick: () -> U
 }
 
 @Composable
-private fun RecentReportCard(report: com.example.smartlogistics.network.CargoReport) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+private fun RecentReportCard(
+    report: com.example.smartlogistics.network.CargoReport,
+    navController: NavController,
+    idToName: Map<String, String> = emptyMap()
+) {
+    val destName = idToName[report.destinationPoiId] ?: report.destinationPoiId ?: "未知目的地"
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { navController.navigate("truck_history") },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(48.dp).background(if (report.cargoInfo.isHazardous) ErrorRedLight else TruckOrangeLight, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Icon(imageVector = if (report.cargoInfo.isHazardous) Icons.Rounded.Warning else Icons.Rounded.Inventory, contentDescription = null, tint = if (report.cargoInfo.isHazardous) ErrorRed else TruckOrange, modifier = Modifier.size(24.dp))
@@ -205,7 +227,7 @@ private fun RecentReportCard(report: com.example.smartlogistics.network.CargoRep
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = report.cargoInfo.cargoType, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                Text(text = "目的地: ${report.destinationPoiId}", fontSize = 13.sp, color = TextSecondary)
+                Text(text = "目的地: $destName", fontSize = 13.sp, color = TextSecondary)
             }
             StatusChip(text = when(report.status) { "pending" -> "待确认"; "confirmed" -> "已确认"; "completed" -> "已完成"; else -> report.status ?: "未知" }, color = when(report.status) { "pending" -> WarningYellow; "confirmed" -> InfoBlue; "completed" -> SuccessGreen; else -> TextSecondary })
         }
@@ -447,6 +469,10 @@ fun TruckBindScreen(navController: NavController, viewModel: MainViewModel? = nu
             heightM = ""
             weightT = ""
             recognitionResult = null
+            viewModel?.resetVehicleState()
+        } else if (vehicleState is VehicleState.Error) {
+            // Error状态延迟重置，让UI有时间显示错误信息后恢复可点击
+            kotlinx.coroutines.delay(2000)
             viewModel?.resetVehicleState()
         }
     }
@@ -1559,6 +1585,16 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                                         ?: gateNameMap[recommendedGateId?.uppercase()]
                                     // 如果找不到合法名称（比如后端返回了字段名而非值），跳过不显示
                                     if (recName == null) return@item
+                                    // 用 roadSegments（列表数据）里的实时排队数覆盖后端reason字符串
+                                    // 保证推荐横幅与列表排队数一致，避免两个接口快照不同步
+                                    val recQueueCount = roadSegments.find { it.id == recommendedGateId }
+                                        ?.estimatedTime  // estimatedTime 格式为"排队: X辆"
+                                        ?.replace("排队: ", "")?.replace("辆", "")?.trim()?.toIntOrNull()
+                                    val syncedReason = if (recQueueCount != null && recommendReason != null) {
+                                        // 替换 reason 里的排队数为列表实时值
+                                        recommendReason!!.replace(Regex("排队\\d+辆"), "排队${recQueueCount}辆")
+                                            .replace(Regex("当前排队\\d+辆"), "当前排队${recQueueCount}辆")
+                                    } else recommendReason
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
@@ -1583,9 +1619,9 @@ fun TruckRoadScreen(navController: NavController, viewModel: MainViewModel? = nu
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = TruckOrange
                                                 )
-                                                if (!recommendReason.isNullOrBlank()) {
+                                                if (!syncedReason.isNullOrBlank()) {
                                                     Text(
-                                                        text = recommendReason!!,
+                                                        text = syncedReason,
                                                         fontSize = 12.sp,
                                                         color = TextSecondary
                                                     )
@@ -2313,8 +2349,8 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
     // 从后端获取报备历史数据
     val reports by viewModel?.reports?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
 
-    // 初始加载数据
-    LaunchedEffect(Unit) {
+    // 每次进入页面都重新拉取（包括退出重登后）
+    LaunchedEffect(true) {
         isLoading = true
         loadError = null
         try {
@@ -2335,9 +2371,19 @@ fun TruckHistoryScreen(navController: NavController, viewModel: MainViewModel? =
 
             if (cargoType == null) return@mapNotNull null
 
+            val warehouseIdToName = mapOf(
+                "warehouse_814584217" to "BCS国内货运营业厅",
+                "warehouse_814584219" to "中国南航北京分公司货物",
+                "warehouse_814584220" to "东航物流",
+                "warehouse_814584221" to "大兴南航国际货站",
+                "warehouse_814584222" to "大兴国际机场BCS国际货运站",
+                "warehouse_814584223" to "北京大兴国际机场海关货运综合楼",
+                "warehouse_10012544018" to "机场货运区"
+            )
+            val destName = warehouseIdToName[report.destinationPoiId] ?: report.destinationPoiId ?: "未知目的地"
             HistoryRecord(
                 date = report.createdAt?.substring(0, 10) ?: currentDate.toString(),
-                route = "$cargoType → ${report.destinationPoiId}",
+                route = "$cargoType → $destName",
                 cargoType = cargoType,
                 distance = weight ?: 0.0,
                 duration = "-",
@@ -2800,8 +2846,7 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
             com.example.smartlogistics.network.POI("warehouse_814584220", "东航物流",                    39.521154, 116.443440, "industrial", address = "大兴机场货运区"),
             com.example.smartlogistics.network.POI("warehouse_814584221", "大兴南航国际货站",            39.520380, 116.447661, "industrial", address = "大兴机场货运区"),
             com.example.smartlogistics.network.POI("warehouse_814584222", "大兴国际机场BCS国际货运站",   39.520507, 116.450195, "industrial", address = "大兴机场货运区"),
-            com.example.smartlogistics.network.POI("warehouse_814584223", "北京大兴国际机场海关货运综合楼", 39.525124, 116.451206, "commercial", address = "大兴机场货运区"),
-            com.example.smartlogistics.network.POI("warehouse_10012544018", "机场货运区",               39.525820, 116.451098, "industrial", address = "大兴机场货运区")
+            com.example.smartlogistics.network.POI("warehouse_814584223", "北京大兴国际机场海关货运综合楼", 39.525124, 116.451206, "commercial", address = "大兴机场货运区")
         )
     }
     var warehousePois by remember { mutableStateOf<List<com.example.smartlogistics.network.POI>>(defaultWarehousePois) }
@@ -2860,9 +2905,12 @@ fun CargoReportScreen(navController: NavController, viewModel: MainViewModel? = 
                         isHazardous = it == "危险品"
                     }
                     parsed.weight?.let { weight = it }
-                    // 目的地 - 尝试匹配POI名称
+                    // 目的地 - 从货运仓库列表（warehousePois）里匹配，与下拉菜单数据源一致
                     parsed.destination?.let { destName ->
-                        pois.find { it.name.contains(destName) || destName.contains(it.name) }?.let { selectedPoi = it }
+                        warehousePois.find { it.name.contains(destName) || destName.contains(it.name) }?.let {
+                            selectedPoi = it
+                            // 同时展开下拉让用户确认
+                        }
                     }
                     // 危险品类别 - 从名称匹配HazmatClass对象
                     parsed.hazardClass?.let { hazardName ->

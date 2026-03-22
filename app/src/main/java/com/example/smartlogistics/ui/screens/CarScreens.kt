@@ -81,12 +81,12 @@ private fun mapVehicleTypeToCn(vehicleType: String?): String {
 // 私家车版支持的选项: sedan(轿车), suv(SUV), bus(客车), minibus(小型客车)
 private fun mapVehicleTypeToCarOption(vehicleType: String?): String {
     return when (vehicleType?.lowercase()) {
-        "sedan", "car" -> "轿车"              // 轿车 -> 轿车
-        "suv" -> "SUV"                         // SUV -> SUV
-        "bus" -> "客车"                         // 客车 -> 客车
-        "minibus", "van" -> "小型客车"          // 小型客车、面包车 -> 小型客车
-        "truck", "pickup" -> " 客车（大型）"             // 货车、皮卡 -> 客车（大型）
-        else -> "轿车"                        // 默认选择轿车
+        "sedan", "car" -> "sedan"              // 轿车
+        "suv" -> "suv"                         // SUV
+        "bus" -> "bus"                         // 客车
+        "minibus", "van" -> "minibus"          // 小型客车
+        "truck", "pickup" -> "bus"             // 货车、皮卡 -> 客车（大型）
+        else -> "sedan"                        // 默认轿车
     }
 }
 
@@ -860,6 +860,9 @@ fun CarBindScreen(navController: NavController, viewModel: MainViewModel? = null
         if (vehicleState is VehicleState.BindSuccess) {
             plateNumber = ""
             recognitionResult = null
+            viewModel?.resetVehicleState()
+        } else if (vehicleState is VehicleState.Error) {
+            kotlinx.coroutines.delay(2000)
             viewModel?.resetVehicleState()
         }
     }
@@ -3150,7 +3153,7 @@ fun CarHistoryScreen(navController: NavController, viewModel: MainViewModel? = n
     var allHistoryRecords by remember { mutableStateOf<List<CarHistoryRecord>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(true) {
         isLoading = true
         try {
             val resp = withContext(kotlinx.coroutines.Dispatchers.IO) {

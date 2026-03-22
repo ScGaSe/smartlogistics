@@ -107,6 +107,10 @@ fun LoginScreen(
                 val userId = userInfo?.id ?: 1
                 NotificationService.getInstance().connect(userId)
 
+                // 登录成功后重新拉取报备和车辆数据
+                viewModel?.fetchReports()
+                viewModel?.fetchVehicles()
+
 
                 navController.navigate(targetHome) {
                     popUpTo("login") { inclusive = true }
